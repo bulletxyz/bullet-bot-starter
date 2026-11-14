@@ -8,7 +8,7 @@ write your own strategies for it.
 [![Deploy with Claude][badge]][deploy]
 
 [badge]: https://img.shields.io/badge/Deploy%20with-Claude-D97757?logo=claude&logoColor=white
-[deploy]: https://claude.ai/new?q=Deploy%20and%20set%20up%20my%20Bullet%20trading%20bot%20for%20me.%20Follow%20this%20guide%3A%20https%3A%2F%2Fbots.bullet.xyz%2Fdeploy-with-claude.md
+[deploy]: https://claude.ai/new?q=Deploy%20and%20set%20up%20my%20Bullet%20trading%20bot%20for%20me.%20Follow%20this%20guide%3A%20https%3A%2F%2Fraw.githubusercontent.com%2Fbulletxyz%2Fbullet-bot-starter%2Fmain%2FDEPLOY-WITH-CLAUDE.md
 
 You need a computer and a Solana wallet with $20+ USDC and a little SOL for fees. No wallet yet?
 [Phantom](https://phantom.com/download) takes two minutes.
@@ -19,7 +19,8 @@ You need a computer and a Solana wallet with $20+ USDC and a little SOL for fees
    trading** to try it first.
 3. **Connect to Claude** from your bot's page, and Allow.
 
-About three minutes. [What Claude does](https://bots.bullet.xyz/deploy-with-claude.md).
+About three minutes.
+[What Claude does](https://github.com/bulletxyz/bullet-bot-starter/blob/main/DEPLOY-WITH-CLAUDE.md).
 Rather run it yourself? [Run it with Docker](docs/DEPLOY.md).
 
 ## 2. Trade

@@ -21,8 +21,8 @@ just ci              # fmt, clippy -D warnings, tests, build
 - `support/`: small helpers copied from the bot (client ids, the IOC price cap, the close price).
 - `strategies/<name>/`: one plugin each. `parity/`: the built-ins' recorded calls and their replay.
 - `docs/`: [making](docs/MAKE-A-STRATEGY.md) and [installing](docs/INSTALL.md) a strategy,
-  [running the bot with Docker](docs/DEPLOY.md). Setting a bot up is the bot's own guide
-  (https://bots.bullet.xyz/deploy-with-claude.md), linked from the README.
+  [running the bot with Docker](docs/DEPLOY.md). Setting a bot up is the guide Claude follows,
+  `DEPLOY-WITH-CLAUDE.md` (the README's button links its raw URL on `main`: never move it).
 - `skills/bullet-wasm-plugin/SKILL.md`: building and installing a plugin from a Claude chat. Keep it
   in step with the build. The bot links this path: never move it.
 
