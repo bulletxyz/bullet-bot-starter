@@ -31,6 +31,7 @@ Edit `strategies/my-strategy/src/lib.rs`:
 
 More to copy from: [ladder](../strategies/ladder/) (retries, unknown outcomes, venue reads),
 [grid-wasm](../strategies/grid-wasm/) and [rsi-momentum-wasm](../strategies/rsi-momentum-wasm/).
+[sma](../strategies/sma/) warms up on past candles: the bot gives a plugin up to 999 bars at start.
 
 ## Test and build
 

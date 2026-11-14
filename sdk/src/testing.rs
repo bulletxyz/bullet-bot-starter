@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 
 use crate::Decimal;
 use crate::adapter::{Event, Intent, MarketFacts, StrategyAdapter, StrategyError, View};
+use crate::history::{Candle, CandleInterval, Warmup};
 use crate::legs::LegView;
 use crate::types::{NewOrder, Order, OrderBook, OrderResult, Position, Side, Trade};
 
@@ -24,6 +25,27 @@ pub fn book(bid: &str, ask: &str, size: &str) -> OrderBook {
         asks: BTreeMap::from([(d(ask), d(size))]),
         last_update_id: 1,
     }
+}
+
+/// Closed `interval` bars with these `closes` (open, high and low at the close), oldest first, the
+/// last one closing when the bar holding `now_ms` opened: what the host hands a warm-up.
+#[must_use]
+pub fn closed_candles(interval: CandleInterval, now_ms: u64, closes: &[&str]) -> Vec<Candle> {
+    let open = interval.open_of(now_ms);
+    let back = |k: usize| {
+        let k = u64::try_from(k).unwrap_or(u64::MAX).saturating_add(1);
+        open.saturating_sub(k.saturating_mul(interval.ms()))
+    };
+    closes
+        .iter()
+        .rev()
+        .enumerate()
+        .map(|(k, close)| {
+            let p = d(close);
+            Candle { open_ms: back(k), open: p, high: p, low: p, close: p, volume: Decimal::ONE }
+        })
+        .rev()
+        .collect()
 }
 
 /// What a test shows a strategy, owned; [`Market::view`] borrows it as the host would.
@@ -157,6 +179,14 @@ impl<S: StrategyAdapter> SimHost<S> {
     pub fn start(&mut self) -> Result<Vec<Intent>, StrategyError> {
         let first = self.strategy.start(&self.market.view())?;
         Ok(self.carry_out(first))
+    }
+
+    /// The host's warm-up before [`Self::start`]: `warmup` handed over only when the strategy
+    /// asks for history, as the host does.
+    pub fn warm_up(&mut self, warmup: Warmup) {
+        if self.strategy.history().is_some() {
+            self.strategy.warm_up(warmup);
+        }
     }
 
     /// `event`, then the answers to what it asked. A fill moves the position first.

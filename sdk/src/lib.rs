@@ -1,6 +1,6 @@
 //! The guest SDK for bullet-bots strategies. A strategy implements [`StrategyAdapter`] (data in,
 //! intents out), [`FromSettings`] and [`Describe`], and `export_strategy!(MyStrategy)` makes the
-//! crate a `bb:strategy@0.4.0` component when it is built for `wasm32-wasip2` (`crate-type =
+//! crate a `bb:strategy@0.5.0` component when it is built for `wasm32-wasip2` (`crate-type =
 //! ["cdylib", "rlib"]`). The same code runs natively in its own tests.
 //!
 //! Pure: no tokio, no I/O, no clock. The port's shape is bb-strategy's (`StrategyAdapter`,
@@ -14,12 +14,14 @@ pub mod decimal;
 mod describe;
 #[doc(hidden)]
 pub mod guest;
+mod history;
 mod legs;
 #[cfg(feature = "testing")]
 pub mod testing;
 mod types;
 mod wire;
 mod wire_calls;
+mod wire_history;
 
 pub use adapter::{
     Event, FieldValue, FromSettings, Intent, MarketFacts, PaperInputs, ReportField,
@@ -29,6 +31,7 @@ pub use calls::{Answer, CallError, ReadQuery, VenueCall};
 pub use describe::{
     Describe, Descriptor, LegNeed, Loosening, Range, SettingKind, SettingSpec, Tier,
 };
+pub use history::{Candle, CandleInterval, HistoryNeed, MAX_HISTORY_CANDLES, Warmup};
 pub use legs::{LegView, TRADE_LEG};
 pub use rust_decimal::Decimal;
 pub use types::{
@@ -38,7 +41,7 @@ pub use types::{
 };
 
 /// The version of the `bb:strategy` world this SDK builds components for.
-pub const WORLD_VERSION: &str = "0.4.0";
+pub const WORLD_VERSION: &str = "0.5.0";
 
 /// The world's generated bindings (wit-bindgen over `wit/strategy.wit`).
 #[doc(hidden)]
@@ -87,6 +90,14 @@ macro_rules! export_strategy {
                 $crate::guest::init::<$strategy>(&settings)
             }
 
+            fn history() -> Option<$crate::guest::w::HistoryNeed> {
+                $crate::guest::history()
+            }
+
+            fn warm_up(warmup: $crate::guest::w::PastCandles) {
+                $crate::guest::warm_up(warmup);
+            }
+
             fn start(
                 view: $crate::guest::w::View,
             ) -> Result<Vec<$crate::guest::w::Intent>, String> {
@@ -115,8 +126,3 @@ macro_rules! export_strategy {
         $crate::__bindings::__export_strategy_world!(__BbStrategyComponent with_types_in $crate::__bindings);
     };
 }
-
-/// This crate's folder where it was built: `{SOURCE_DIR}/wit` holds the world it exports. The bot's
-/// WASM host generates its bindings from that WIT (in its build script), so the two never differ.
-#[doc(hidden)]
-pub const SOURCE_DIR: &str = env!("CARGO_MANIFEST_DIR");

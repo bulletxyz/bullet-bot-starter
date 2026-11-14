@@ -9,6 +9,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::calls::{Answer, CallError, VenueCall};
+use crate::history::{HistoryNeed, Warmup};
 use crate::legs::LegView;
 use crate::types::{
     AmendOrder, CancelOrder, NewOrder, Order, OrderBook, OrderResult, Position, Trade,
@@ -33,6 +34,17 @@ pub trait StrategyAdapter: Send + 'static {
     /// The strategy's own extras (levels, signals). Position, entry, P&L, fills and orders are the
     /// host's; a strategy never reports them itself.
     fn report(&self) -> Self::Report;
+
+    /// The past candles this strategy warms up on, asked once after it is built: the host loads
+    /// them before [`Self::start`] and hands them to [`Self::warm_up`]. `None` (the default): it
+    /// needs no history.
+    fn history(&self) -> Option<HistoryNeed> {
+        None
+    }
+
+    /// Once, before [`Self::start`], for a strategy whose [`Self::history`] asked: the bars, or why
+    /// there are none. Without them it warms up from live data, as it would with no history.
+    fn warm_up(&mut self, _warmup: Warmup) {}
 }
 
 /// How a component builds its strategy: from the settings the host loads it with (JSON text).

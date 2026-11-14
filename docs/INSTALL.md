@@ -1,6 +1,6 @@
 # Install a strategy on your bot
 
-Plugins built here need bot release v43 or later (the `bb:strategy@0.4.0` world). If your bot says a
+Plugins built here need bot release v47 or later (the `bb:strategy@0.5.0` world). If your bot says a
 newer release is out, update it first: on Railway, redeploy the service.
 
 ## 1. Send it to the bot

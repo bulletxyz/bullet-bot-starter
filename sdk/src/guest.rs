@@ -7,9 +7,9 @@ use std::cell::RefCell;
 
 use crate::adapter::{FromSettings, StrategyAdapter, StrategyError, StrategyReport};
 use crate::describe::Describe;
-use crate::wire;
 /// The world's generated types, for the macro.
 pub use crate::wire::w;
+use crate::{wire, wire_history};
 
 /// The strategy behind the component's exports, with its report type erased.
 trait Running {
@@ -17,9 +17,19 @@ trait Running {
     fn on_event(&mut self, event: w::Event, view: &w::View) -> Vec<w::Intent>;
     fn stop(&mut self, view: &w::View) -> Vec<w::Intent>;
     fn report(&self) -> w::ReportRecord;
+    fn history(&self) -> Option<w::HistoryNeed>;
+    fn warm_up(&mut self, warmup: w::PastCandles);
 }
 
 impl<S: StrategyAdapter> Running for S {
+    fn history(&self) -> Option<w::HistoryNeed> {
+        StrategyAdapter::history(self).map(wire_history::history_need_to_wire)
+    }
+
+    fn warm_up(&mut self, warmup: w::PastCandles) {
+        StrategyAdapter::warm_up(self, wire_history::warmup_from_wire(warmup));
+    }
+
     fn start(&mut self, view: &w::View) -> Result<Vec<w::Intent>, String> {
         let owned = wire::OwnedView::from_wire(view).map_err(|e| e.to_string())?;
         let intents = StrategyAdapter::start(self, &owned.view()).map_err(|e| e.0)?;
@@ -110,6 +120,21 @@ pub fn init<S: StrategyAdapter + FromSettings>(settings: &str) -> Result<(), Str
     let strategy = S::from_settings(settings).map_err(|StrategyError(e)| e)?;
     STRATEGY.with(|s| *s.borrow_mut() = Some(Box::new(strategy)));
     Ok(())
+}
+
+/// `history`: the past candles the strategy warms up on; none before `init`.
+#[must_use]
+pub fn history() -> Option<w::HistoryNeed> {
+    STRATEGY.with(|s| s.borrow().as_ref().and_then(|s| s.history()))
+}
+
+/// `warm-up`: what the host loaded, to the strategy; dropped before `init`.
+pub fn warm_up(warmup: w::PastCandles) {
+    STRATEGY.with(|s| {
+        if let Some(strategy) = s.borrow_mut().as_mut() {
+            strategy.warm_up(warmup);
+        }
+    });
 }
 
 /// # Errors

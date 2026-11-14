@@ -5,14 +5,16 @@
 ///
 /// Versioning: a change that breaks an existing guest or host is a new major (or, before 1.0, a new
 /// minor) version. A host runs every version it lists and refuses the rest; an older version's
-/// world is kept as it was in the host, so a component built against it loads unchanged. 0.2.0
+/// world is kept as it was (`wit-0.2.0/`), so a component built against it loads unchanged. 0.2.0
 /// added `describe`; 0.3.0 added legs (other venue accounts, `leg-view`, `intent::leg`,
 /// `event::leg`, `descriptor.legs`), `flatten`, venue calls (`intent::request`, `event::answer`),
 /// the mark price, an order whose outcome is unknown, the view's venue positions, reconnect,
 /// venue halt, path stop and read start, and the fee tier and venue name; and it replaced the
 /// report's JSON and its `schema` with typed fields (`report-field`), which the host shows. 0.4.0 added an
-/// order's `protect`: the stop (and take-profit) the venue holds for the position once it fills.
-package bb:strategy@0.4.0;
+/// order's `protect`: the stop (and take-profit) the venue holds for the position once it fills. 0.5.0
+/// added past candles at start: `history` (what the strategy warms up on) and `warm-up` (what the host
+/// loaded), so an indicator has its history from its first event, after every restart too.
+package bb:strategy@0.5.0;
 
 /// The strategy: StrategyAdapter's calls, plus `init` (build it from its settings), with the data the
 /// host and the strategy exchange.
@@ -487,10 +489,65 @@ interface adapter {
         legs: list<leg-need>,
     }
 
+    /// A candle's length.
+    enum candle-interval {
+        m1,
+        m5,
+        m15,
+        m30,
+        h1,
+        h4,
+        d1,
+    }
+
+    /// One closed candle of the market's past prices.
+    record candle {
+        /// When it opened (unix ms, a multiple of the interval).
+        open-ms: u64,
+        open: decimal,
+        high: decimal,
+        low: decimal,
+        close: decimal,
+        /// Traded in it, in the base asset (zero when the source does not say).
+        volume: decimal,
+    }
+
+    /// The past candles a strategy warms up on.
+    record history-need {
+        /// The candles' length: the one the strategy builds live.
+        interval: candle-interval,
+        /// The most bars it can use; the host gives at most 999.
+        want: u32,
+        /// The fewest it can warm up on: fewer and it gets `unavailable`.
+        need: u32,
+    }
+
+    /// The past candles the host loaded.
+    record loaded-candles {
+        /// Closed bars, oldest first, with no gap: the last one closed when the bar open at
+        /// `now-ms` (which the live data builds) opened. Rebased onto the market's price.
+        candles: list<candle>,
+        /// The venue they came from, as a person reads it.
+        source: string,
+        /// The bot's clock when they were checked.
+        now-ms: u64,
+    }
+
+    /// What the host loaded for a `history-need`.
+    variant past-candles {
+        loaded(loaded-candles),
+        /// None loaded, in plain words why: the strategy warms up from live data.
+        unavailable(string),
+    }
+
     /// What it is: callable before `init`, and it must not depend on settings.
     describe: func() -> descriptor;
     /// Build the strategy from its settings (JSON text). An error refuses the load.
     init: func(settings: string) -> result<_, string>;
+    /// After `init`, asked once: the past candles it warms up on, if any.
+    history: func() -> option<history-need>;
+    /// Once, before `start`, for a strategy whose `history` asked: the bars, or why there are none.
+    warm-up: func(past: past-candles);
     /// Once, before any event. An error stops the build.
     start: func(view: view) -> result<list<intent>, string>;
     on-event: func(event: event, view: view) -> list<intent>;
