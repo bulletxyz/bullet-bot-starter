@@ -120,3 +120,16 @@ names:
 That ends the onboarding. The bot's page can't reopen this chat (its New Claude chat starts one). Later, if
 the bot's tools are here, say once before your first call to one: "Claude will ask to let Bullet
 Bot's tools run: choose Always allow." Then call `setup` and follow it.
+
+## The bot's address
+
+If the user asks how to connect Claude, or the bot's tools stop answering, send this one link behind
+the words "Add to Claude" (the same bot domain you built the claim link from, `/mcp` after it,
+percent-encoded as `connectorUrl`):
+
+`[Add to Claude](https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=Bullet%20Bot&connectorUrl=https%3A%2F%2F<domain>%2Fmcp)`
+
+Don't ask them to copy an address into Settings. The bot's page "Connect Claude" does the same.
+
+A redeploy to a new URL changes the address. The old connector fails silently, so send the link
+again with the new domain.
