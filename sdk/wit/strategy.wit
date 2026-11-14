@@ -1,0 +1,504 @@
+/// The `bb:strategy` world: a trading strategy as a component. It mirrors bb-strategy's
+/// `StrategyAdapter`: the host feeds it events with a view of the market and the bot's own state,
+/// and it answers with intents. A strategy imports nothing: no files, network, clock or randomness;
+/// time and data come in through the host.
+///
+/// Versioning: a change that breaks an existing guest or host is a new major (or, before 1.0, a new
+/// minor) version. A host runs every version it lists and refuses the rest; an older version's
+/// world is kept as it was in the host, so a component built against it loads unchanged. 0.2.0
+/// added `describe`; 0.3.0 added legs (other venue accounts, `leg-view`, `intent::leg`,
+/// `event::leg`, `descriptor.legs`), `flatten`, venue calls (`intent::request`, `event::answer`),
+/// the mark price, an order whose outcome is unknown, the view's venue positions, reconnect,
+/// venue halt, path stop and read start, and the fee tier and venue name; and it replaced the
+/// report's JSON and its `schema` with typed fields (`report-field`), which the host shows. 0.4.0 added an
+/// order's `protect`: the stop (and take-profit) the venue holds for the position once it fills.
+package bb:strategy@0.4.0;
+
+/// The strategy: StrategyAdapter's calls, plus `init` (build it from its settings), with the data the
+/// host and the strategy exchange.
+interface adapter {
+    /// An exact decimal (rust_decimal's `Decimal`): value = mantissa / 10^scale.
+    /// The mantissa is a signed 128-bit integer split in two: mantissa = hi * 2^64 + lo, `hi`
+    /// carrying the sign. Valid: |mantissa| < 2^96 and scale <= 28; anything else is refused.
+    record decimal {
+        hi: s64,
+        lo: u64,
+        scale: u8,
+    }
+
+    enum side {
+        buy,
+        sell,
+    }
+
+    enum order-type {
+        limit,
+        post-only,
+        market,
+    }
+
+    enum order-status {
+        open,
+        partially-filled,
+        filled,
+        cancelled,
+        rejected,
+    }
+
+    /// One price level of a book.
+    record level {
+        price: decimal,
+        quantity: decimal,
+    }
+
+    /// A book: both sides in ascending price order (the best bid is the last bid, the best ask
+    /// the first ask).
+    record order-book {
+        bids: list<level>,
+        asks: list<level>,
+        last-update-id: u64,
+    }
+
+    /// One of the strategy's orders as the venue lists it.
+    record order {
+        id: string,
+        client-id: option<string>,
+        symbol: string,
+        side: side,
+        order-type: order-type,
+        price: decimal,
+        quantity: decimal,
+        filled-quantity: decimal,
+        status: order-status,
+    }
+
+    /// The stop (and take-profit) the venue holds for the position an order opens: a price its mark
+    /// must cross (below a long, above a short for the stop; the other side for the take-profit),
+    /// when the venue closes the whole position. It never opens one. A venue that holds none
+    /// refuses the order; paper sends none.
+    record protection {
+        stop: option<decimal>,
+        take-profit: option<decimal>,
+    }
+
+    record new-order {
+        symbol: string,
+        side: side,
+        order-type: order-type,
+        price: decimal,
+        quantity: decimal,
+        client-id: option<string>,
+        reduce-only: bool,
+        protect: option<protection>,
+    }
+
+    /// A cancel by venue order id, or by client id when the venue id is empty.
+    record cancel-order {
+        symbol: string,
+        order-id: string,
+        client-id: option<string>,
+    }
+
+    /// Replace one order with another.
+    record amend-order {
+        cancel: cancel-order,
+        new-order: new-order,
+    }
+
+    /// What the venue (or the host's gate) answered for one intent.
+    record order-result {
+        order-id: option<string>,
+        client-id: option<string>,
+        success: bool,
+        error: option<string>,
+    }
+
+    /// What the venue answered for one cancel of a batch.
+    record cancel-result {
+        order-id: string,
+        success: bool,
+        error: option<string>,
+    }
+
+    /// A fill of one of the bot's orders.
+    record trade {
+        exchange: string,
+        symbol: string,
+        order-id: string,
+        trade-id: option<string>,
+        client-id: option<string>,
+        side: side,
+        price: decimal,
+        quantity: decimal,
+        /// Unix milliseconds, when the venue reports it.
+        timestamp: option<u64>,
+    }
+
+    /// The venue's facts about the market, when it reports them.
+    record market-facts {
+        tick-size: option<decimal>,
+        step-size: option<decimal>,
+        maker-fee-bps: option<decimal>,
+        taker-fee-bps: option<decimal>,
+        /// The account's fee tier, when the venue has tiers.
+        fee-tier: option<u64>,
+        /// The venue's name as a person reads it, for text the strategy words for the owner.
+        venue-name: option<string>,
+    }
+
+    /// One of the venue's positions: `side` none when flat.
+    record position {
+        symbol: string,
+        side: option<side>,
+        size: decimal,
+        entry-price: decimal,
+        unrealized-pnl: decimal,
+    }
+
+    record account-equity {
+        equity: decimal,
+        wallet-balance: decimal,
+        unrealized-pnl: decimal,
+    }
+
+    /// One settled funding payment, at the 8h-equivalent rate.
+    record funding-sample {
+        time-ms: s64,
+        rate-8h: decimal,
+    }
+
+    /// One of the strategy's other legs (another venue account, or more symbols) as the host
+    /// knows it now. Per symbol lists hold one entry per symbol that has one.
+    record leg-view {
+        /// The strategy's name for it (`descriptor.legs`): what its intents and events carry.
+        id: string,
+        /// The venue it trades.
+        venue: string,
+        /// The symbols declared on it; an intent for another one is refused.
+        symbols: list<string>,
+        /// The last book of each symbol, and when it came (the bot's clock, ms).
+        books: list<tuple<string, order-book>>,
+        book-at-ms: list<tuple<string, u64>>,
+        /// The last positive mark price of each symbol.
+        marks: list<tuple<string, decimal>>,
+        /// The last live funding rate (per 8h) the venue's marks carried for each symbol.
+        funding-rates: list<tuple<string, decimal>>,
+        /// The venue's positions as the last read of this leg found them; none when that read
+        /// failed, and from a fill on the leg until the next read. Unknown is never flat.
+        positions: option<list<position>>,
+        market: list<tuple<string, market-facts>>,
+        /// The leg's connection reconnected since the tick before: what came meanwhile may have
+        /// been missed. True for the tick that read it only.
+        reconnected: bool,
+    }
+
+    /// What the host shows the strategy on every call.
+    record view {
+        /// The bot's clock, Unix milliseconds.
+        now-ms: u64,
+        symbol: string,
+        book: option<order-book>,
+        /// The host's inventory from fills, seeded from the venue position at start.
+        position: decimal,
+        avg-entry: option<decimal>,
+        realized-pnl: decimal,
+        /// The strategy's resting orders from a venue read just made; none when the list is
+        /// unknown or stale (a strategy must not treat a level as gone then).
+        open-orders: option<list<order>>,
+        /// The venue's positions from the same read as `open-orders`, with the same freshness;
+        /// none otherwise. A strategy sizes its closes and reconciles its inventory on this.
+        positions: option<list<position>>,
+        /// The venue stream reconnected since the strategy last saw a tick: events may have been
+        /// missed, so a strategy reconciles against `open-orders` and `positions` now. True on
+        /// one tick's view, then false.
+        reconnected: bool,
+        /// The venue refuses orders (why), e.g. a stale oracle on its side: a strategy stops
+        /// quoting until this is none again.
+        venue-halt: option<string>,
+        market: market-facts,
+        /// Every other leg the host was given; empty for a strategy on one symbol.
+        legs: list<leg-view>,
+        /// The host's own order path refuses new orders (why): its stop, not the venue's.
+        /// Refusals it causes are not the venue's rejections.
+        path-stop: option<string>,
+        /// When the venue read behind `open-orders` started (the bot's clock, ms); none without
+        /// a fresh read. A strategy that decides on what a read omits compares this with when it
+        /// sent the order.
+        read-started-ms: option<u64>,
+    }
+
+    /// An intent on one leg: a leg holds no leg and makes no request (a request names its leg).
+    variant leg-intent {
+        place(new-order),
+        cancel(cancel-order),
+        cancel-all,
+        amend(amend-order),
+        flatten(list<string>),
+    }
+
+    record on-leg {
+        /// One of the host's legs, or `trade` for the one it was built over.
+        leg: string,
+        intent: leg-intent,
+    }
+
+    record book-query {
+        symbol: string,
+        depth: u32,
+    }
+
+    record funding-query {
+        symbol: string,
+        /// Unix milliseconds.
+        start-ms: s64,
+    }
+
+    /// A read of a leg's venue.
+    variant read-query {
+        positions,
+        /// The orders resting on `symbol`: what frees a level whose order never landed.
+        open-orders(string),
+        /// A fresh book, `depth` levels.
+        book(book-query),
+        account-equity,
+        margin-ratio,
+        funding-history(funding-query),
+        open-interest(string),
+        /// Re-read the venue's metadata; the new facts show in the next view.
+        refresh-metadata,
+    }
+
+    /// What a request asks of the host. Every write passes the leg's gate.
+    variant venue-call {
+        read(read-query),
+        place(list<new-order>),
+        cancel(list<cancel-order>),
+        amend(list<amend-order>),
+        /// Cancel everything resting on this symbol.
+        cancel-all(string),
+        /// Wake at this time on the bot's clock (ms).
+        wait(u64),
+    }
+
+    /// A venue call the host makes for the strategy, between events, answered exactly once by
+    /// `event::answer` under the same `id` (the strategy picks it; one in flight is never reused).
+    record request {
+        id: u64,
+        /// One of the host's legs, or `trade`.
+        leg: string,
+        call: venue-call,
+    }
+
+    /// What a strategy asks the host to do. Every order passes the host's gate.
+    variant intent {
+        place(new-order),
+        cancel(cancel-order),
+        cancel-all,
+        amend(amend-order),
+        /// Stop the bot, with the reason.
+        shutdown(string),
+        /// An intent on one of the host's legs, through that leg's gate.
+        leg(on-leg),
+        /// Close the venue's position in each of these symbols (reduce-only IOCs at the touch,
+        /// capped from mid); succeeds only when each reads flat again.
+        flatten(list<string>),
+        request(request),
+    }
+
+    /// The answer to one intent, matched by client id.
+    record outcome {
+        intent: intent,
+        %result: order-result,
+    }
+
+    /// The call that carried out a place or an amend errored after it may have reached the venue:
+    /// the order may be resting or filled. A strategy holds the order's slot until a venue read
+    /// that started after it lists or omits it.
+    record unknown {
+        intent: intent,
+        error: string,
+    }
+
+    /// Something on one leg: the leg's books, marks and positions are in the view's `legs`.
+    variant leg-event-kind {
+        book,
+        mark(decimal),
+        fill(trade),
+        order(order),
+    }
+
+    record leg-event {
+        leg: string,
+        symbol: string,
+        event: leg-event-kind,
+    }
+
+    /// What a venue call came back with.
+    variant venue-answer {
+        positions(list<position>),
+        open-orders(list<order>),
+        book(order-book),
+        account-equity(option<account-equity>),
+        margin-ratio(option<decimal>),
+        funding-history(list<funding-sample>),
+        open-interest(option<decimal>),
+        /// One result per order, in the batch's order; a refusal before the venue is a result
+        /// that did not succeed.
+        placed(list<order-result>),
+        cancelled(list<cancel-result>),
+        /// A cancel all, a metadata refresh or a wait is done.
+        done,
+    }
+
+    /// A venue call that failed.
+    record call-error {
+        message: string,
+        /// It never reached the venue (refused by the host); otherwise a write may have landed.
+        never-sent: bool,
+        /// The venue says trying again may succeed.
+        retryable: bool,
+    }
+
+    record answer {
+        id: u64,
+        reply: result<venue-answer, call-error>,
+    }
+
+    /// Something that happened.
+    variant event {
+        /// The book changed; the book is in the view.
+        book,
+        /// The venue's mark price for the host's symbol.
+        mark(decimal),
+        fill(trade),
+        order(order),
+        tick,
+        outcome(outcome),
+        leg(leg-event),
+        answer(answer),
+        unknown(unknown),
+    }
+
+    /// What the paper report needs from a strategy that quotes.
+    record paper-inputs {
+        order-size: decimal,
+        quoting-secs: u64,
+        maker-fee-bps: decimal,
+    }
+
+    /// A report field's value.
+    variant field-value {
+        number(decimal),
+        text(string),
+        flag(bool),
+    }
+
+    /// One field of the strategy's report. The host builds the report and its schema from these:
+    /// at most 128 fields, a name of 1 to 64 characters, a text of at most 200 and a unit of at
+    /// most 16; one past a bound faults the strategy.
+    record report-field {
+        /// What it is, e.g. `fills` or `buy 1`.
+        name: string,
+        value: field-value,
+        /// Its unit, e.g. `s` or `bps`; none for a count, a price or a word.
+        unit: option<string>,
+    }
+
+    /// The strategy's own report, as one record per call.
+    record report-record {
+        /// What it shows of itself, in order.
+        fields: list<report-field>,
+        headline: string,
+        briefing-lines: list<string>,
+        paper-inputs: option<paper-inputs>,
+        reference-price: option<decimal>,
+    }
+
+    /// How a setting is typed: what bb-core's `ParamKind` names.
+    variant setting-kind {
+        decimal,
+        int,
+        /// 0 (off) or 1 (on).
+        flag,
+        /// One of these; the default is the index of one.
+        choice(list<string>),
+        /// Free text, with its default.
+        text(string),
+        /// A list of strings, with its default.
+        words(list<string>),
+    }
+
+    /// Who may change a setting, and how it applies (bb-core's `Tier`).
+    enum tier {
+        tune,
+        structural,
+        limit,
+        guard,
+    }
+
+    /// Which way a change loosens a limit or guard (bb-core's `Loosening`): raising the value,
+    /// lowering it, or neither. The host asks the owner to sign a loosening.
+    enum loosening {
+        none,
+        up,
+        down,
+    }
+
+    /// A range; an open side has none.
+    record range {
+        min: option<decimal>,
+        max: option<decimal>,
+    }
+
+    /// One setting, in the shape strategy descriptors use (bb-core's `Setting` and `ParamSpec`).
+    record setting {
+        /// `a.b` is `b` in table `a` of the strategy's settings.
+        path: string,
+        kind: setting-kind,
+        default: decimal,
+        /// The range used by default.
+        guarded: range,
+        /// The absolute limit; covers `guarded`.
+        hard: range,
+        help: string,
+        tier: tier,
+        /// For a `limit` or `guard`: which direction loosens it.
+        loosening: loosening,
+        /// The settings must give it: no default applies.
+        required: bool,
+    }
+
+    /// A leg the strategy needs besides the one it trades: the host refuses to start it without
+    /// a leg of this id on this venue.
+    record leg-need {
+        id: string,
+        venue: string,
+    }
+
+    /// What the component is, read from its bytes before anything runs.
+    record descriptor {
+        name: string,
+        /// The strategy's own version (semver).
+        version: string,
+        summary: string,
+        settings: list<setting>,
+        /// The JSON schema of the settings `init` takes, as JSON text.
+        settings-schema: string,
+        legs: list<leg-need>,
+    }
+
+    /// What it is: callable before `init`, and it must not depend on settings.
+    describe: func() -> descriptor;
+    /// Build the strategy from its settings (JSON text). An error refuses the load.
+    init: func(settings: string) -> result<_, string>;
+    /// Once, before any event. An error stops the build.
+    start: func(view: view) -> result<list<intent>, string>;
+    on-event: func(event: event, view: view) -> list<intent>;
+    /// The bot is winding down: what to send before it stops.
+    stop: func(view: view) -> list<intent>;
+    report: func() -> report-record;
+}
+
+world strategy {
+    export adapter;
+}

@@ -1,0 +1,50 @@
+# The Bullet bot strategy starter: the guest SDK, the example strategies and what builds them into
+# WASM components (wasm32-wasip2) a bb bot runs as plugins. No crate here depends on the bot.
+[workspace]
+resolver = "3"
+members = ["sdk", "support", "parity", "strategies/*"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.95"
+publish = false
+license = "Apache-2.0"
+
+[workspace.dependencies]
+bb-strategy-sdk = { path = "sdk" }
+bb-strategy-support = { path = "support" }
+bb-strategy-parity = { path = "parity" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rust_decimal = { version = "1", features = ["serde-with-str"] }
+schemars = { version = "1", features = ["rust_decimal1"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unused_qualifications = "warn"
+missing_debug_implementations = "allow"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+duration_suboptimal_units = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+# A strategy runs with real money: no silent panics, no overflowing arithmetic.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+arithmetic_side_effects = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+allow_attributes_without_reason = "deny"
+allow_attributes = "warn"
+
+[profile.release]
+lto = "thin"
+panic = "abort"
+strip = true

@@ -1,0 +1,16 @@
+# Allow unwrap/expect/panic in test code without needing per-file #[allow].
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+
+# Trading-code constructors (orders, configs) legitimately take many fields.
+too-many-arguments-threshold = 8
+
+# A strategy reads no wall clock: time comes in through the view (`View::now_ms`). A component
+# could not read it anyway (the host's clock is frozen), and native tests stay deterministic.
+disallowed-methods = [
+    { path = "std::time::Instant::now", reason = "take the time from View::now_ms" },
+    { path = "std::time::SystemTime::now", reason = "take the time from View::now_ms" },
+    { path = "std::time::Instant::elapsed", reason = "take the time from View::now_ms" },
+    { path = "std::time::SystemTime::elapsed", reason = "take the time from View::now_ms" },
+]
