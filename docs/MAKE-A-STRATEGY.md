@@ -28,6 +28,9 @@ Edit `strategies/my-strategy/src/lib.rs`:
 - `stop` runs when the bot winds down: return `CancelAll`.
 - `report` is what the bot's page shows about it.
 - `Settings` and `describe()` are the settings the owner can change, with ranges.
+  Do not name one `symbol`, `dry_run`, `state_dir`, `max_position`, `daily_loss_usd`, `stale_secs`,
+  `max_notional_usd` or `max_orders_per_min` (or `legs.<leg>.symbols`): the bot keeps those names for itself and
+  refuses the file when you add it.
 
 More to copy from: [ladder](../strategies/ladder/) (retries, unknown outcomes, venue reads),
 [grid-wasm](../strategies/grid-wasm/) and [rsi-momentum-wasm](../strategies/rsi-momentum-wasm/).

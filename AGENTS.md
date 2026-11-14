@@ -34,6 +34,9 @@ just ci              # fmt, clippy -D warnings, tests, build
   (`View::now_ms`), no randomness, no `tracing`. Clippy denies panics and unchecked arithmetic.
 - `Describe::NAME` is its folder name. Bump `version` in its `Cargo.toml` for any change.
 - At most 64 intents a call; cancel only its own orders; never `Shutdown` (the bot faults it).
+- Settings it declares must not be named `symbol`, `dry_run`, `state_dir`, `max_position`, `daily_loss_usd`,
+  `stale_secs`, `max_notional_usd` or `max_orders_per_min` (nor one under them), nor `legs.<leg>.symbols`: the bot
+  keeps those for itself and refuses such a file when it is added, before anyone signs.
 - A change to a port's logic needs its parity tests green; a change that makes a fixture differ is
   a change from the built-in: say so in the port's `adapter.rs` docs.
 
