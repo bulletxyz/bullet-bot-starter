@@ -1,7 +1,7 @@
 # SDK cheat sheet
 
-Everything a strategy touches, on one page. The source is `sdk/src/` (`adapter.rs`, `types.rs`,
-`calls.rs`, `legs.rs`, `history.rs`, `describe.rs`, `testing.rs`); the template
+Everything a strategy touches, on one page. The source is `sdk/src/` (`strategy/adapter.rs`, `types.rs`,
+`host/calls.rs`, `host/legs.rs`, `history/`, `strategy/describe.rs`, `testing.rs`); the template
 (`templates/strategy/`) uses most of it.
 
 Agents: clone the repo first (`git clone https://github.com/<owner>/bullet-bot-starter`, the
@@ -51,6 +51,9 @@ the checkout, not file by file over the web.
 | `Answer { id, reply }` | The one answer to your `Request` with that `id`. |
 | `Leg { leg, symbol, event }` | A book, mark, fill or order update on another leg. |
 
+The bot's built-in strategies run on the same trait and also get `Reference`, `Control`, `Persisted`,
+`Closed` and `Failed`; a plugin is never sent them (match them with `_ => Vec::new()`).
+
 ## `Intent`: what you ask for
 
 - `Place(NewOrder)`: `symbol`, `side`, `order_type` (`Limit`, `PostOnly`, `Market`), `price`,
@@ -67,6 +70,9 @@ the checkout, not file by file over the web.
   until_ms }`. Answered once by `Event::Answer` with the same `id`; don't reuse an id in flight.
 - `Leg { leg, intent }`: an intent on a declared leg (`TRADE_LEG`, `"trade"`, is the main one).
 - `Shutdown`: never; the bot faults a plugin that sends it. To stop, cancel and send nothing more.
+- `Reply`, `Persist`, `ClosePosition`, `SetLimits`, `Targets`: for the bot's built-in strategies only. A plugin
+  that returns one faults (the component traps): never return them. A plugin's `CancelOwn` crosses as `CancelAll`
+  and its `Notify` is dropped.
 
 At most 64 intents a call.
 

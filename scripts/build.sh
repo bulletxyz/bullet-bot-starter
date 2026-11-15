@@ -14,7 +14,13 @@ if [ ! -d "$sysroot/lib/rustlib/$target" ]; then
   exit 1
 fi
 
-if [ $# -gt 0 ]; then names=("$@"); else names=(); for d in strategies/*/; do names+=("$(basename "$d")"); done; fi
+# Only crates with a cdylib are plugins; the rest are the bot's built-ins.
+if [ $# -gt 0 ]; then
+  names=("$@")
+else
+  names=()
+  for d in strategies/*/; do grep -q cdylib "$d/Cargo.toml" && names+=("$(basename "$d")"); done
+fi
 
 sha() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
 field() {
@@ -28,6 +34,7 @@ packages=()
 for name in "${names[@]}"; do
   manifest="strategies/$name/Cargo.toml"
   [ -f "$manifest" ] || { echo "no strategy named $name (strategies/$name)" >&2; exit 1; }
+  grep -q cdylib "$manifest" || { echo "$name is a built-in, not a plugin" >&2; exit 1; }
   packages+=(-p "$(field name "$manifest")")
 done
 

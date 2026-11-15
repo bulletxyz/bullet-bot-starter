@@ -5,6 +5,14 @@ use rust_decimal::Decimal;
 
 use bb_strategy_sdk::{OrderBook, Side};
 
+/// Maximum distance (bps) from mid at which a close-position IOC may trade.
+pub const CLOSE_MAX_SLIPPAGE_BPS: u32 = 20;
+/// IOC attempts per close-position request.
+pub const CLOSE_ATTEMPTS: u32 = 3;
+/// No IOC is priced further than this from the reference (bps; the book's mid, else a fresh mark),
+/// however far a retry widens it.
+pub const MAX_IOC_BPS_FROM_MID: Decimal = Decimal::from_parts(200, 0, 0, false, 0);
+
 const BPS: Decimal = Decimal::from_parts(10_000, 0, 0, false, 0);
 
 /// The mid of a book with both sides, uncrossed; `None` otherwise (empty, one-sided, crossed).

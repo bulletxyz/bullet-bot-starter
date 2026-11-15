@@ -1,0 +1,19 @@
+[package]
+license.workspace = true
+name = "bb-strategy-funding-arb"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Funding rate arbitrage strategy for bullet-bots: the blueprint decide behind the StrategyAdapter port (Intent::Targets)"
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+bb-strategy-sdk = { workspace = true }
+rust_decimal = { workspace = true }
+serde = { workspace = true }

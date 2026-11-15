@@ -38,8 +38,7 @@ Edit `strategies/my-strategy/src/lib.rs`:
   changed live at `plugins.<name>.<setting>`, and the bot never takes one for its own limits. Only
   `legs.<leg>.symbols` for a leg you declare is the bot's.
 
-More to copy from: [ladder](../strategies/ladder/) (retries, unknown outcomes, venue reads),
-[grid-wasm](../strategies/grid-wasm/) and [rsi-momentum-wasm](../strategies/rsi-momentum-wasm/).
+More to copy from: [ladder](../strategies/ladder/) (retries, unknown outcomes, venue reads).
 [sma](../strategies/sma/) warms up on past candles: the bot gives a plugin up to 999 bars at start.
 
 ## Test and build

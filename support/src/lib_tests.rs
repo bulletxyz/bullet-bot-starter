@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use super::*;
 
 #[test]
@@ -12,15 +10,14 @@ fn clip_keeps_short_text_and_cuts_long_text_to_max_characters() {
 }
 
 #[test]
-fn would_cross_at_or_past_the_touch_and_not_on_an_empty_side() {
-    let book = OrderBook {
-        bids: BTreeMap::from([(Decimal::from(100), Decimal::ONE)]),
-        asks: BTreeMap::from([(Decimal::from(101), Decimal::ONE)]),
-        last_update_id: 0,
-    };
-    assert!(book.would_cross(Side::Buy, Decimal::from(101)));
-    assert!(!book.would_cross(Side::Buy, Decimal::from(100)));
-    assert!(book.would_cross(Side::Sell, Decimal::from(100)));
-    assert!(!book.would_cross(Side::Sell, Decimal::from(101)));
-    assert!(!OrderBook::default().would_cross(Side::Buy, Decimal::ONE));
+fn floor_to_step_rounds_down_and_is_zero_for_a_non_positive_step_or_quantity() {
+    use rust_decimal::Decimal;
+    let d = |s: &str| s.parse::<Decimal>().unwrap();
+    assert_eq!(floor_to_step(d("3.37"), Decimal::ZERO), Decimal::ZERO, "step 0");
+    assert_eq!(floor_to_step(d("3.37"), d("-0.1")), Decimal::ZERO, "negative step");
+    assert_eq!(floor_to_step(Decimal::ZERO, d("0.1")), Decimal::ZERO, "qty 0");
+    assert_eq!(floor_to_step(d("-3.37"), d("0.1")), Decimal::ZERO, "negative qty");
+    assert_eq!(floor_to_step(d("0.09"), d("0.1")), Decimal::ZERO, "below one step");
+    assert_eq!(floor_to_step(d("3.3"), d("0.1")), d("3.3"), "an exact multiple");
+    assert_eq!(floor_to_step(d("3.37"), d("0.1")), d("3.3"), "rounded down");
 }

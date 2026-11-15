@@ -41,9 +41,11 @@ just new my-strategy      # strategies/my-strategy/ from templates/strategy
 ```
 
 The folder name is the plugin's name: `Describe::NAME` must be the same. Bump `version` in its
-`Cargo.toml` for every change. No I/O, clock, randomness or `tracing`: time is `View::now_ms`. More
-to copy from: `strategies/ladder/` (retries, unknown outcomes, venue reads), `grid-wasm`,
-`rsi-momentum-wasm`, and `sma` (past candles).
+`Cargo.toml` for every change. No I/O, clock, randomness or `tracing`: time is `View::now_ms`. Never
+return `Reply`, `Persist`, `ClosePosition`, `SetLimits` or `Targets`: they are the bot's built-ins' only,
+and a plugin that returns one faults (`CancelOwn` crosses as `CancelAll`, `Notify` is dropped). More to copy from:
+`strategies/ladder/` (retries, unknown outcomes, venue reads) and `sma` (past candles; up to 999 bars at
+start).
 
 Need `bb-strategy-support` (`capped_ioc_price`, `close_reference`, `ClientIdIssuer::own`) or another
 crate? Add it to the strategy's `Cargo.toml`, then run `cargo update --workspace --offline` before
@@ -66,7 +68,6 @@ The lints are strict: every warning fails. Expect:
 - an `#[allow]` without a reason: use `#[expect(lint, reason = "...")]`.
 - pedantic style: `as` casts (use `try_from` or `From`), `needless_pass_by_value`, missing
   backticks in doc comments, `too_many_lines`, `float_cmp`, identical match arms, redundant clones.
-- `assert!(x.is_empty())` in a test (`clippy::assert_is_empty`): write `assert_eq!(x.len(), 0)`.
 
 ## 4. Build it
 

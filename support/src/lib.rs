@@ -1,25 +1,31 @@
-//! Helpers the bundled strategies share, over the SDK's types. Each module is a copy of the
-//! bullet-bots code it names, kept the same so a port decides as the built-in does.
+//! Helpers the built-in strategies and the plugins share, over the SDK's types: the bot (bb-core
+//! re-exports them) and a plugin decide with the same code.
 //!
-//! - [`client_id`]: bb-core's `helpers::client_id` (the bot's own client ids), without the
-//!   wall-clock seed: a component has no clock, so it seeds from the view's `now_ms`.
-//! - [`ioc`]: bb-core's `helpers::ioc` (the two-sided mid and the IOC price cap).
-//! - [`close_price`]: bb-strategy's `close_price` (what a close is priced off).
-//! - [`BookExt`]: bb-core's `OrderBook::would_cross`, which the SDK's book does not have.
-//! - [`side_word`]: bb-core's `Display` for `Side`; [`clip`]: a report text within the bot's limit.
+//! - [`client_id`]: the bot's own client ids. A component has no clock, so it seeds from the view's `now_ms`
+//!   ([`ClientIdIssuer::own`]); `session_seeded` is seeded from the wall clock natively and from 0 on `wasm32`.
+//! - [`ioc`]: the two-sided mid and the IOC price cap, and the close's attempts and slippage cap.
+//! - [`close_price`]: what a close is priced off.
+//! - [`funding`]: a taker's walk through a book and the trailing median of settled funding.
+//! - [`inventory`]: the inventory and realized P&L tracker fills are recorded into.
+//! - [`floor_to_step`]: a size rounded down to the lot step.
+//! - [`side_word`]: a side as the bot words it; [`clip`]: a report text within the bot's limit.
 
 pub mod client_id;
 pub mod close_price;
+pub mod funding;
+pub mod inventory;
 pub mod ioc;
 
-use bb_strategy_sdk::{Decimal, OrderBook, Side};
+use bb_strategy_sdk::{Decimal, MAX_FIELD_TEXT, MAX_HEADLINE, OrderBook, Side};
 
 pub use client_id::{ClientIdIssuer, is_own};
 pub use close_price::{close_reference, touch};
+pub use funding::{trailing_median, walk_slip_bps};
+pub use inventory::InventoryTracker;
 
-/// The most characters a bot takes in a report's headline or one text field: past it the plugin
-/// faults (bb-strategy-wasm's `MAX_HEADLINE`, `MAX_FIELD_TEXT`).
-pub const MAX_REPORT_TEXT: usize = 200;
+/// The most characters a bot takes in a report's headline or one text field: past it the plugin faults.
+pub const MAX_REPORT_TEXT: usize = MAX_FIELD_TEXT;
+const _: () = assert!(MAX_HEADLINE == MAX_FIELD_TEXT);
 
 /// `text` cut to at most `max` characters, ending in `…` when cut: a report must never fault for
 /// quoting a long refusal.
@@ -33,6 +39,18 @@ pub fn clip(text: &str, max: usize) -> String {
     out
 }
 
+#[must_use]
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "a size over a positive lot step, far below 7.9e28"
+)]
+pub fn floor_to_step(qty: Decimal, step: Decimal) -> Decimal {
+    if step <= Decimal::ZERO || qty <= Decimal::ZERO {
+        return Decimal::ZERO;
+    }
+    (qty / step).floor() * step
+}
+
 /// A side as bb-core's `Display` writes it: `buy` or `sell`.
 #[must_use]
 pub fn side_word(side: Side) -> &'static str {
@@ -42,19 +60,16 @@ pub fn side_word(side: Side) -> &'static str {
     }
 }
 
-/// What bb-core's `OrderBook` has that the SDK's does not.
+/// Kept so plugins that import it still build; the SDK's book has it now.
+#[deprecated(note = "use the inherent `OrderBook::would_cross`")]
 pub trait BookExt {
-    /// Whether an order at `price` would cross: buys at or above the best ask, sells at or below
-    /// the best bid. An empty side is no information, so it does not cross.
     fn would_cross(&self, side: Side, price: Decimal) -> bool;
 }
 
+#[expect(deprecated, reason = "the deprecated shim's own impl")]
 impl BookExt for OrderBook {
     fn would_cross(&self, side: Side, price: Decimal) -> bool {
-        match side {
-            Side::Buy => self.best_ask().is_some_and(|ask| price >= ask.price),
-            Side::Sell => self.best_bid().is_some_and(|bid| price <= bid.price),
-        }
+        OrderBook::would_cross(self, side, price)
     }
 }
 

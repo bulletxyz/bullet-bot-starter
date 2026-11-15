@@ -1,5 +1,5 @@
 # Replays the calls bullet-bots' built-in strategies answered (recorded from their own tests, under
-# the bot's real StrategyHost) through a port on the SDK, and compares the intents. Tests only.
+# the bot's real StrategyHost) on the built-ins' crates, and compares the intents. Tests only.
 [package]
 license.workspace = true
 name = "bb-strategy-parity"
@@ -7,7 +7,7 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-description = "Replays the built-in strategies' recorded calls through their SDK ports"
+description = "Replays the built-in strategies' recorded calls on their crates"
 
 [lints]
 workspace = true

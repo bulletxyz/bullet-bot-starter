@@ -1,0 +1,29 @@
+[package]
+license.workspace = true
+name = "bb-strategy-grid"
+version = "0.3.1"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Grid trading strategy for bullet-bots: a futures grid on one Bullet market"
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+bb-strategy-sdk = { workspace = true }
+bb-strategy-support = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rust_decimal = { workspace = true }
+schemars = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+bb-strategy-sdk = { workspace = true, features = ["testing"] }
+bb-strategy-parity = { workspace = true }
+serde_json = { workspace = true }
+rust_decimal = { workspace = true }

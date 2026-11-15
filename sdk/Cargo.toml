@@ -22,6 +22,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 rust_decimal = { workspace = true }
 schemars = { workspace = true }
+erased-serde = { workspace = true }
+chrono = { workspace = true }
 wit-bindgen = { version = "=0.63.0", default-features = false, features = ["macros", "realloc", "std"] }
 
 [lib]
