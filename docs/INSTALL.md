@@ -1,15 +1,15 @@
 # Install a strategy on your bot
 
-Update your bot first if it says a newer release is out (on Railway, redeploy the service).
+Update your bot first if it says a newer release is out (on Railway, redeploy the service in your [dashboard](https://railway.com/dashboard)).
 
 ## 1. Send it to the bot
 
 Pick one:
 
 - **Built in Claude Code:** Claude uploads it with a one-time link (`plugin_upload_link`). In a cloud
-  session it first checks it can reach your bot and shows you how to allow its address. Every step:
+  session it first checks it can reach your bot and shows you how to allow its address, from [claude.ai/code](https://claude.ai/code). Every step:
   the [guide](../skills/bullet-wasm-plugin/SKILL.md).
-- **File on your computer:** on your bot's page, click *Add plugin* (at the bottom).
+- **File on your computer:** on your bot's page (Claude gives you its link), click *Add plugin* (at the bottom).
 - **Plugin someone shared** at a public https link: tell Claude "Install the plugin at `<url>`,
   sha256 `<hash>`." (`install_plugin_from_url`)
 

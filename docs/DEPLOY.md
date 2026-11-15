@@ -32,7 +32,8 @@ Claude, and every sign link the bot sends you, need the bot on a public https ad
    and name it in `BB_TRUSTED_CLIENT_IP_HEADER` (Caddy: `header_up X-Real-IP {remote_host}`, then
    `X-Real-IP`). The proxy must be the only way to the bot.
 2. In Claude: *Settings > Connectors > Add custom connector*, paste `https://<hostname>/mcp`,
-   *Connect*, and sign with your wallet.
+   *Connect*, and sign with your wallet. Or open this with your hostname filled in (claude.ai on the
+   web): `https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=Bullet%20Bot&connectorUrl=https%3A%2F%2F<hostname>%2Fmcp`
 
 Never publish the port over plain http on a public address.
 

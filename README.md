@@ -5,15 +5,23 @@ write your own strategies for it.
 
 ## 1. Get your bot
 
-[![Deploy with Claude][badge]][deploy]
+[![Deploy with Claude Code][badge]][deploy]
 
-[badge]: https://img.shields.io/badge/Deploy%20with-Claude-D97757?logo=claude&logoColor=white
-[deploy]: https://claude.ai/new?q=Deploy%20and%20set%20up%20my%20Bullet%20trading%20bot%20for%20me.%20Follow%20this%20guide%3A%20https%3A%2F%2Fraw.githubusercontent.com%2Fbulletxyz%2Fbullet-bot-starter%2Fmain%2FDEPLOY-WITH-CLAUDE.md
+[badge]: https://img.shields.io/badge/Deploy%20with-Claude%20Code-D97757?logo=claude&logoColor=white
+[deploy]: https://claude.ai/code?prompt=Deploy%20and%20set%20up%20my%20Bullet%20trading%20bot%20for%20me.%20Follow%20this%20guide%3A%20https%3A%2F%2Fraw.githubusercontent.com%2Fbulletxyz%2Fbullet-bot-starter%2Fmain%2FDEPLOY-WITH-CLAUDE.md
 
-You need a computer and a Solana wallet with $20+ USDC and a little SOL for fees. No wallet yet?
+Use Claude Code, not a regular Claude chat: the button opens it (in the Claude app, the **Code** tab). No message
+filled in? Paste this into Claude Code:
+
+```text
+Deploy and set up my Bullet trading bot for me. Follow this guide: https://raw.githubusercontent.com/bulletxyz/bullet-bot-starter/main/DEPLOY-WITH-CLAUDE.md
+```
+
+You need a Claude plan with Claude Code (Pro or above), a computer, and a Solana wallet with $20+ USDC and a
+little SOL for fees. No wallet yet?
 [Phantom](https://phantom.com/download) takes two minutes.
 
-1. **Click Deploy with Claude, then send.** Connect Railway when Claude asks, and say OK. Claude
+1. **Click Deploy with Claude Code, then send it in Claude Code.** Connect Railway when Claude asks, and say OK. Claude
    puts your bot on Railway (a free $5 trial, then about $5 a month).
 2. **Open your bot** from Claude's link and make it yours with your wallet. Pick **Paper
    trading** to try it first.
@@ -40,9 +48,18 @@ Built in: the market maker (start here), grid and RSI momentum.
 [badge2]: https://img.shields.io/badge/Build%20a%20strategy-Claude%20Code-D97757?logo=claude&logoColor=white
 [build]: https://claude.ai/code?prompt=Build%20a%20strategy%20plugin%20for%20my%20Bullet%20bot%20and%20install%20it%20on%20paper.%20Follow%20this%20guide%3A%20https%3A%2F%2Fraw.githubusercontent.com%2Fbulletxyz%2Fbullet-bot-starter%2Fmain%2Fskills%2Fbullet-wasm-plugin%2FSKILL.md
 
+Use Claude Code, not a regular Claude chat: the button opens it (in the Claude app, the **Code** tab). No message
+filled in? Paste this into Claude Code:
+
+```text
+Build a strategy plugin for my Bullet bot and install it on paper. Follow this guide: https://raw.githubusercontent.com/bulletxyz/bullet-bot-starter/main/skills/bullet-wasm-plugin/SKILL.md
+```
+
 1. Connect your bot to Claude first (step 1).
-2. Click the button, send, and say what your strategy should do. Claude Code builds it from this repo's template.
-3. If Claude asks, allow your bot's address in network access (a few clicks, it shows you how).
+2. Click the button and send it in Claude Code, then say what your strategy should do. Claude Code builds it
+   from this repo's template.
+3. If Claude asks, allow your bot's address in network access (a few clicks, it shows you how, from
+   [claude.ai/code](https://claude.ai/code); that setting has no direct link).
 4. Approve the plugin with your wallet. It starts on paper.
 
 By hand instead: [Make a strategy](docs/MAKE-A-STRATEGY.md), then [install it](docs/INSTALL.md).

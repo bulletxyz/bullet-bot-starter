@@ -5,7 +5,9 @@ does the rest (ownership, real money or paper trading, funding, connecting Claud
 all.
 
 **When you give the user steps:** numbered, one action per step, the action first; the fewest words;
-caveats after, one line, or not at all; never open with what can't be done.
+caveats after, one line, or not at all; never open with what can't be done. Put a link straight to
+the page beside each step list, filled in yourself from what you know (the bot's domain): never a
+placeholder for them to fill.
 
 ## Never
 
@@ -27,7 +29,7 @@ bot), carry on at step 1.
 
 ## 1. Message 1
 
-On a phone? Claude's phone apps can't deploy this: say once to carry on in claude.ai on a computer.
+On a phone? The Code tab can deploy, but the bot's page needs their wallet on a computer: say so once.
 
 First search your tools for Railway's (`deploy-template`, `list-workspaces`): a connector's tools
 often need loading before they show, so never tell them Railway isn't connected before you searched.
@@ -40,6 +42,12 @@ go straight to step 2. Otherwise send this, word for word and nothing else:
 > computer and a Solana wallet with $20+ USDC and a little SOL for fees.
 
 Their "OK" only means carry on. A new connector reaches you with their next message.
+
+In Claude Code, connectors added at claude.ai (Railway, the bot) appear in the session on their own
+([docs](https://code.claude.com/docs/en/mcp#use-mcp-servers-from-claude-ai)); in a terminal, `/mcp`
+lists them. In a cloud session their traffic needs no allowed domains
+([docs](https://code.claude.com/docs/en/cloud-environments#network-access)). Never ask for a Railway
+token: the connector signs in with OAuth.
 
 ## 2. Deploy, silently
 
@@ -95,7 +103,7 @@ own URLs: your web fetch can't open them, and the user sees a red "Failed".
 
    Then the link is `https://<domain>/#claim=<code>`, which you build yourself: never send the
    logged URL. If either check fails, send only "Your bot's logs show a claim link that isn't for
-   your bot's own address, so I won't send it. Check the bot's service on Railway." and stop.
+   your bot's own address, so I won't send it. Check the bot's service on [Railway](https://railway.com/dashboard)." and stop.
 
    The link lets whoever opens it make the bot theirs, so it goes to the user alone, and nowhere
    else. If the line says there is no claim link, the domain is missing: generate it and redeploy.
@@ -105,7 +113,8 @@ If you can't deploy, send this and stop (the bot's page alone can't make it thei
 link from the logs):
 "I couldn't deploy it from here. Do this:
 1. [Deploy on Railway](https://railway.com/deploy/bullet-bot) and tap Deploy, nothing filled in.
-2. Once it's running, open the service's Deploy Logs.
+2. Once it's running, open it in your [Railway dashboard](https://railway.com/dashboard), then the
+   service's Deploy Logs.
 3. Copy the line that starts "This bot has no owner yet" and paste it here."
 When they paste it, check it as in 5. If Railway's tools can read the service, `<domain>` is its
 domain as there; if they can't, the host must be a Railway domain (ending in `.up.railway.app`),
@@ -135,6 +144,10 @@ percent-encoded as `connectorUrl`):
 `[Add to Claude](https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=Bullet%20Bot&connectorUrl=https%3A%2F%2F<domain>%2Fmcp)`
 
 Don't ask them to copy an address into Settings. The bot's page "Connect Claude" does the same.
+
+In Claude Code the connector appears by itself once added at claude.ai. Without it, in a terminal:
+`claude mcp add --transport http bullet-bot https://<domain>/mcp`, then `/mcp` to sign in
+([docs](https://code.claude.com/docs/en/mcp)).
 
 A redeploy to a new URL changes the address. The old connector fails silently, so send the link
 again with the new domain.

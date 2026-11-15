@@ -13,7 +13,9 @@ Never ask for, accept or print a private key, seed phrase or token. Never take a
 live is the owner's signed change.
 
 **When you give the user steps:** numbered, one action per step, the action first; the fewest words;
-caveats after, one line, or not at all; never open with what can't be done.
+caveats after, one line, or not at all; never open with what can't be done. Put a link straight to
+the page beside each step list, filled in yourself (the bot's page is `https://<host>/`): never a
+placeholder for them to fill. Where no link exists, say so in one line.
 
 ## 1. Get the code and the toolchain
 
@@ -92,7 +94,8 @@ is blocked, so this passes and you skip the rest.
 
 **If blocked,** send the user these steps with their host filled in.
 
-In the Claude app or at claude.ai/code:
+In the Claude app or at [claude.ai/code](https://claude.ai/code) (that link opens Claude Code; the
+setting itself has no direct link):
 
 1. Click the environment selector (the first button under the message box).
 2. Under Cloud, hover your environment and click the settings icon on its right.
@@ -102,7 +105,8 @@ In the Claude app or at claude.ai/code:
    managers" ticked).
 5. Click Save changes, then tell me "done".
 
-No settings icon in the app? Do the same steps at claude.ai/code in a browser.
+No settings icon in the app? Do the same steps at [claude.ai/code](https://claude.ai/code) in a
+browser. Access levels: [Claude Code docs](https://code.claude.com/docs/en/cloud-environments#network-access).
 
 It reaches this session within a minute. Shared by an organization? An admin changes it in its
 settings (Cloud environments).
@@ -122,10 +126,10 @@ settings (Cloud environments).
 **No bot tools in this session?** Send the user one of these (the first that fits):
 
 1. In a terminal or the desktop app: run `claude mcp add --transport http bullet-bot https://<bot domain>/mcp`, then
-   sign in with `/mcp`.
+   sign in with `/mcp` ([docs](https://code.claude.com/docs/en/mcp)).
 2. Send this in your bot's Claude chat: "Give me a plugin upload link for `<name>` v`<version>`, size
    `<bytes>`, sha256 `<hash>`", and paste the link here. You then upload to it.
-3. Nothing reaches the bot? On your bot's page, click *Add plugin* (at the bottom) and pick the `.wasm`.
+3. Nothing reaches the bot? On [your bot's page](https://<host>/), click *Add plugin* (at the bottom) and pick the `.wasm`.
 
 A plugin someone published at a public link (a shared, ready-made strategy) installs with
 `install_plugin_from_url` and its sha256 instead.
