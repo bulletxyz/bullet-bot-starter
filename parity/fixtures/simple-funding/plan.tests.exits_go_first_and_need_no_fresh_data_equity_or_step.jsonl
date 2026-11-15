@@ -1,0 +1,2 @@
+{"kind":"header","strategy":"simple-funding","test":"plan.tests.exits_go_first_and_need_no_fresh_data_equity_or_step"}
+{"kind":"plan","rows":[{"symbol":"B","mark":"10","held_base":"0","step":"0.1","oi_base":"1000000","fresh":true,"target_usd":"100"},{"symbol":"A","mark":"10","held_base":"3","step":null,"oi_base":null,"fresh":false,"target_usd":"0"}],"equity":null,"foreign_gross_usd":"0","caps":{"notional_per_symbol":"100","max_positions":8,"max_leverage":"2","max_oi_pct":"0.05"},"actions":[{"symbol":"A","side":"sell","qty":"3","reduce_only":true}]}

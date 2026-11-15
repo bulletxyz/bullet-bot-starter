@@ -63,7 +63,7 @@ On your own computer instead: [Make a strategy](docs/MAKE-A-STRATEGY.md), then
 
 | Folder | What |
 |---|---|
-| [strategies/](strategies/) | Example plugins: [ladder](strategies/ladder/), and the bot's grid and RSI momentum ported |
+| [strategies/](strategies/) | Example plugins: [ladder](strategies/ladder/), the bot's grid and RSI momentum ported, and three more you can copy: [Avellaneda-Stoikov](strategies/avellaneda-stoikov-wasm/), [simple funding](strategies/simple-funding-wasm/) and the [funding arb](strategies/funding-arb-wasm/) (the last two run on less than the bot's own versions: each crate's README lists what they cannot do) |
 | [templates/strategy/](templates/strategy/) | What a new strategy starts from |
 | [sdk/](sdk/) | The strategy SDK |
 | [skills/bullet-wasm-plugin/](skills/bullet-wasm-plugin/SKILL.md) | The guide Claude follows to build and install a plugin |

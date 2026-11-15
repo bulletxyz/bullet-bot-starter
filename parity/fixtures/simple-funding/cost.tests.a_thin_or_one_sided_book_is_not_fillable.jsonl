@@ -1,0 +1,5 @@
+{"kind":"header","strategy":"simple-funding","test":"cost.tests.a_thin_or_one_sided_book_is_not_fillable"}
+{"kind":"fills","book":{"bids":{"99.95":"0.5"},"asks":{"100.05":"0.5"},"last_update_id":0},"buy":true,"qty":"1","limit":"101.0505","fills":false}
+{"kind":"fillable","book":{"bids":{"99.95":"0.5"},"asks":{"100.05":"0.5"},"last_update_id":0},"notional":"100","slippage_bps":"100","fillable":false}
+{"kind":"fillable","book":{"bids":{},"asks":{"100.05":"1000"},"last_update_id":0},"notional":"100","slippage_bps":"100","fillable":false}
+{"kind":"fills","book":{"bids":{"99.95":"1000"},"asks":{"100.05":"1000"},"last_update_id":0},"buy":true,"qty":"1","limit":"100.05","fills":true}

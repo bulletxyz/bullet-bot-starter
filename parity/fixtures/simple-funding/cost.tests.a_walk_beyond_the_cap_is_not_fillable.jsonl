@@ -1,0 +1,9 @@
+{"kind":"header","strategy":"simple-funding","test":"cost.tests.a_walk_beyond_the_cap_is_not_fillable"}
+{"kind":"fills","book":{"bids":{"95":"1000","99.95":"0.1"},"asks":{"100.05":"0.1","105":"1000"},"last_update_id":0},"buy":true,"qty":"1","limit":"100.15005","fills":false}
+{"kind":"fillable","book":{"bids":{"95":"1000","99.95":"0.1"},"asks":{"100.05":"0.1","105":"1000"},"last_update_id":0},"notional":"100","slippage_bps":"10","fillable":false}
+{"kind":"fills","book":{"bids":{"95":"1000","99.95":"0.1"},"asks":{"100.05":"0.1","105":"1000"},"last_update_id":0},"buy":true,"qty":"1","limit":"106.0530","fills":true}
+{"kind":"fills","book":{"bids":{"95":"1000","99.95":"0.1"},"asks":{"100.05":"0.1","105":"1000"},"last_update_id":0},"buy":false,"qty":"1","limit":"93.9530","fills":true}
+{"kind":"fillable","book":{"bids":{"95":"1000","99.95":"0.1"},"asks":{"100.05":"0.1","105":"1000"},"last_update_id":0},"notional":"100","slippage_bps":"600","fillable":true}
+{"kind":"fills","book":{"bids":{"95":"1000","99.95":"0.1"},"asks":{"100.05":"0.1","105":"1000"},"last_update_id":0},"buy":true,"qty":"0.05","limit":"100.15005","fills":true}
+{"kind":"fills","book":{"bids":{"95":"1000","99.95":"0.1"},"asks":{"100.05":"0.1","105":"1000"},"last_update_id":0},"buy":false,"qty":"0.05","limit":"99.85005","fills":true}
+{"kind":"fillable","book":{"bids":{"95":"1000","99.95":"0.1"},"asks":{"100.05":"0.1","105":"1000"},"last_update_id":0},"notional":"5","slippage_bps":"10","fillable":true}

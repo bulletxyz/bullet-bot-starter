@@ -1,0 +1,2 @@
+{"kind":"header","strategy":"simple-funding","test":"plan.tests.the_leg_is_clamped_to_notional_per_symbol"}
+{"kind":"plan","rows":[{"symbol":"A","mark":"10","held_base":"0","step":"0.1","oi_base":"1000000","fresh":true,"target_usd":"5000"}],"equity":"10000","foreign_gross_usd":"0","caps":{"notional_per_symbol":"100","max_positions":8,"max_leverage":"2","max_oi_pct":"0.05"},"actions":[{"symbol":"A","side":"buy","qty":"10.0","reduce_only":false}]}

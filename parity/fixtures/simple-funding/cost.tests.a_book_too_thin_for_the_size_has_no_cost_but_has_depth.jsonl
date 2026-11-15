@@ -1,0 +1,2 @@
+{"kind":"header","strategy":"simple-funding","test":"cost.tests.a_book_too_thin_for_the_size_has_no_cost_but_has_depth"}
+{"kind":"assess","book":{"bids":{"99.9":"1"},"asks":{"100.1":"1"},"last_update_id":0},"fee_bps":"4.5","notional":"1000","round_trip":null,"depth_usd":"99.9"}

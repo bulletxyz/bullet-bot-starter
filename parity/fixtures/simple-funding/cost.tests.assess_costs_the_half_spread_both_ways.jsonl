@@ -1,0 +1,2 @@
+{"kind":"header","strategy":"simple-funding","test":"cost.tests.assess_costs_the_half_spread_both_ways"}
+{"kind":"assess","book":{"bids":{"99.9":"1000"},"asks":{"100.1":"1000"},"last_update_id":0},"fee_bps":"4.5","notional":"1000","round_trip":"0.00290","depth_usd":"99900.0"}

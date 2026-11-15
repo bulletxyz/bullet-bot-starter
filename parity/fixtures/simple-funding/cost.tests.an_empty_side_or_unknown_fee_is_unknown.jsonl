@@ -1,0 +1,4 @@
+{"kind":"header","strategy":"simple-funding","test":"cost.tests.an_empty_side_or_unknown_fee_is_unknown"}
+{"kind":"assess","book":{"bids":{"99.9":"1000"},"asks":{"100.1":"1000"},"last_update_id":0},"fee_bps":null,"notional":"1000","round_trip":null,"depth_usd":"99900.0"}
+{"kind":"assess","book":{"bids":{"99.9":"1000"},"asks":{},"last_update_id":0},"fee_bps":"4.5","notional":"1000","round_trip":null,"depth_usd":null}
+{"kind":"assess","book":{"bids":{},"asks":{},"last_update_id":0},"fee_bps":"4.5","notional":"1000","round_trip":null,"depth_usd":null}

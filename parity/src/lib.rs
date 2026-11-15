@@ -21,6 +21,10 @@
 //! `warm_up` that loaded, or `history`), hard limits (`limits`) or a daily loss probe (`day_stop`).
 //! When the port refuses the built-in's settings, the built-in must have refused to start too.
 
+pub mod avellaneda;
+pub mod funding_arb;
+pub mod simple_funding;
+
 use std::collections::BTreeMap;
 use std::path::Path;
 
