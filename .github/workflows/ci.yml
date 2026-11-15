@@ -1,5 +1,7 @@
 # Builds every strategy into a WASM component, runs the tests, and uploads the components with
-# their sha256 (the hash an owner signs). Pinned actions; the toolchain is rust-toolchain.toml's.
+# their sha256 (the hash an owner signs). On a push to your copy's main (or a manual run) it also
+# publishes them as a GitHub release, a link a bot installs from (`install_plugin_from_url`). Pinned
+# actions; the toolchain is rust-toolchain.toml's.
 name: CI
 
 on:
@@ -31,8 +33,18 @@ jobs:
           targets: wasm32-wasip2
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # A strategy pushed from a chat comes without its Cargo.lock entry or rustfmt's layout: on a
+      # push, add the new crates to the lock (every dependency keeps its pinned version) and only
+      # warn about formatting. A pull request must have both.
+      - name: Lock new strategies
+        if: github.event_name != 'pull_request'
+        run: cargo update --workspace
       - name: Format
-        run: cargo fmt --all --check
+        run: |
+          if ! cargo fmt --all --check; then
+            [ "$GITHUB_EVENT_NAME" != pull_request ] || exit 1
+            echo "::warning::Not formatted: run cargo fmt --all, or apply the diff above."
+          fi
       - name: Lint
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Tests (the SDK, the examples, the ports' parity with the bot's built-ins)
@@ -49,3 +61,59 @@ jobs:
             dist/*.sha256
             dist/SHA256SUMS
           if-no-files-found: error
+      # Last, so the plugins above never include it: the template still makes a strategy that
+      # passes the tests and the lints. It guards this starter, so it runs only here, never in a fork.
+      - name: The template
+        if: github.repository == 'bulletxyz/bullet-bot-starter'
+        run: |
+          scripts/new-strategy.sh template-check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test -p bb-strategy-template-check
+
+  # Your copy's plugins as a release, `plugins-<commit>`, marked latest: each `.wasm` with its
+  # `.sha256`, and the notes list each plugin's version, sha256 and download link. Needs no
+  # secret. Not on this starter's own pushes (a manual run publishes there too).
+  publish:
+    name: Publish the plugins
+    needs: build
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.repository != 'bulletxyz/bullet-bot-starter')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: strategies-wasm
+          path: dist
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="plugins-${GITHUB_SHA::7}"
+          base="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$tag"
+          {
+            echo "Strategy plugins built from $GITHUB_SHA. To install one, tell your bot's Claude:"
+            echo "\"install the plugin at <url>, sha256 <sha256>\" (install_plugin_from_url)."
+            for wasm in dist/*.wasm; do
+              name=$(basename "$wasm" .wasm)
+              version=$(sed -n 's/^version = "\(.*\)"/\1/p' "strategies/$name/Cargo.toml" | head -1)
+              echo
+              echo "- **$name** $version"
+              echo "  url: $base/$name.wasm"
+              echo "  sha256: $(cut -d' ' -f1 "$wasm.sha256")"
+            done
+          } > notes.md
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/*.wasm dist/*.sha256 dist/SHA256SUMS --clobber
+            gh release edit "$tag" --notes-file notes.md
+          else
+            gh release create "$tag" dist/*.wasm dist/*.sha256 dist/SHA256SUMS \
+              --target "$GITHUB_SHA" --title "Plugins $tag" --notes-file notes.md --latest
+          fi
+          { echo "Released: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$tag"; echo; cat notes.md; } \
+            >> "$GITHUB_STEP_SUMMARY"

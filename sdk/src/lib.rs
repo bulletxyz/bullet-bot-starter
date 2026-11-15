@@ -33,7 +33,7 @@ pub use describe::{
 };
 pub use history::{Candle, CandleInterval, HistoryNeed, MAX_HISTORY_CANDLES, Warmup};
 pub use legs::{LegView, TRADE_LEG};
-pub use rust_decimal::Decimal;
+pub use rust_decimal::{Decimal, RoundingStrategy};
 pub use types::{
     AccountEquity, AmendOrder, CancelOrder, CancelResult, FundingSample, Level, NewOrder, Order,
     OrderBook, OrderResult, OrderStatus, OrderType, Position, Protection, Side, Trade,

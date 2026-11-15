@@ -3,6 +3,10 @@
 A strategy is a small Rust crate: the bot shows it the market, it answers with orders. It never
 holds a key, reads a clock or touches the network. The bot checks every order against your limits.
 
+Agents: clone the repo first (`git clone https://github.com/<owner>/bullet-bot-starter`, the
+user's copy if they have one, else this one) and read the [SDK cheat sheet](SDK.md), the template and
+the examples from the checkout, not file by file over the web.
+
 ## You need
 
 - [Rust](https://rustup.rs) through `rustup`: in this folder, `rustup toolchain install` installs the
@@ -16,8 +20,9 @@ just new my-strategy
 ```
 
 That makes `strategies/my-strategy/` from a template that already works: one buy under the mid and
-one sell over it, placed again when filled. The folder name is the strategy's name (`Describe::NAME`):
-the bot shows it and your wallet signs it, and the build refuses a file labelled otherwise.
+one sell over it, moved when the mid moves a spacing, within a largest position, with partial fills
+and unknown outcomes handled. The folder name is the strategy's name (`Describe::NAME`): the bot
+shows it and your wallet signs it, and the build refuses a file labelled otherwise.
 
 Edit `strategies/my-strategy/src/lib.rs`:
 
@@ -25,6 +30,7 @@ Edit `strategies/my-strategy/src/lib.rs`:
   your position, P&L, the time (`now_ms`). It returns intents: `Place`, `Cancel`, `CancelAll`.
   A `Place` can carry `protect`: a stop (and take-profit) the venue holds for the position once it
   fills.
+- What every event, view field and intent holds: the [SDK cheat sheet](SDK.md).
 - `stop` runs when the bot winds down: return `CancelAll`.
 - `report` is what the bot's page shows about it.
 - `Settings` and `describe()` are the settings the owner can change, with ranges.
@@ -46,19 +52,21 @@ just build my-strategy    # dist/my-strategy.wasm and dist/my-strategy.wasm.sha2
 The same source and toolchain give the same file in any folder, so the same hash. Bump `version`
 in its `Cargo.toml` for every change.
 
-A Claude chat with a code sandbox can follow the [bullet-wasm-plugin skill](../skills/bullet-wasm-plugin/SKILL.md):
-the toolchain, build, backup and upload in order.
+Claude Code can do all of it and upload the plugin to your bot: the
+[bullet-wasm-plugin guide](../skills/bullet-wasm-plugin/SKILL.md).
 
 ## Keep every version safe
 
-A plugin you lose is a plugin you can't run, check or roll back to. After each `just build`:
+A plugin you lose is a plugin you can't run, check or roll back to. Keep its source and each
+`.wasm` with its sha256 wherever you keep your code. Bump `version` for each change, so the owner's
+approval names it.
 
-- **Most people:** ask Claude to keep it: Claude keeps a page (an artifact) listing each version and its
-  sha256, with the `.wasm` (or a zip of source, `.wasm` and sha256) built into the page as a download,
-  and publishes the page again for each new version. Artifacts can't store a `.wasm` as a file of its own.
-- **Technical users:** work in your own fork of
-  [bullet-bot-starter](https://github.com/bulletxyz/bullet-bot-starter) and commit each version, with
-  a tag or commit message naming its sha256.
+**A download page.** If the user wants one, attach the zip (every source file, each `.wasm`, its
+sha256) in the chat first: it is their backup if the page fails. Then publish an artifact page that
+embeds the zip as base64 data and declares the `downloads` capability (`capabilities: {downloads:
+true}`). The button saves with `(await claude.use("downloads")).save({filename, data: blob})` and is
+hidden when `use()` returns `null`. A `data:` link or `<a download>` does nothing in the artifact
+viewer.
 
 ## Rules the bot enforces
 

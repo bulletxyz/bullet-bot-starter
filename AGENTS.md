@@ -20,13 +20,19 @@ just ci              # fmt, clippy -D warnings, tests, build
   an edit of a released one.
 - `support/`: small helpers copied from the bot (client ids, the IOC price cap, the close price).
 - `strategies/<name>/`: one plugin each. `parity/`: the built-ins' recorded calls and their replay.
-- `docs/`: [making](docs/MAKE-A-STRATEGY.md) and [installing](docs/INSTALL.md) a strategy,
+- `docs/`: [making](docs/MAKE-A-STRATEGY.md) and [installing](docs/INSTALL.md) a strategy, the
+  [SDK cheat sheet](docs/SDK.md),
   [running the bot with Docker](docs/DEPLOY.md), the bot's [HTTP API](docs/API.md) and
   [sign requests and venue keys](docs/AUTH.md) (the docs a bot serves link these three: never move
   them). Setting a bot up is the guide Claude follows,
   `DEPLOY-WITH-CLAUDE.md` (the README's button links its raw URL on `main`: never move it).
-- `skills/bullet-wasm-plugin/SKILL.md`: building and installing a plugin from a Claude chat. Keep it
-  in step with the build. The bot links this path: never move it.
+- `skills/bullet-wasm-plugin/SKILL.md`: building and installing a plugin in Claude Code (the README's
+  button links its raw URL on `main`). Keep it in step with the build. The bot links this path:
+  never move it. `.github/workflows/ci.yml` also publishes a fork's plugins as a `plugins-<commit>`
+  release on each push to its `main`; the guides don't send anyone there.
+
+- A backup download page (an artifact) uses the `downloads` capability, never a `data:` link: see
+  `docs/MAKE-A-STRATEGY.md`. The zip is attached in the chat first.
 
 ## A strategy
 
@@ -40,13 +46,15 @@ just ci              # fmt, clippy -D warnings, tests, build
 - A change to a port's logic needs its parity tests green; a change that makes a fixture differ is
   a change from the built-in: say so in the port's `adapter.rs` docs.
 
+## Writing for the user
+
+When you give the user steps: numbered, one action per step, the action first; the fewest words;
+caveats after, one line, or not at all; never open with what can't be done. They read as little as
+they can: the one thing to do comes first.
+
 ## Safety (always)
 
 - Paper first. Never set a strategy live for the owner: going live is the owner's signed change.
 - The owner signs every plugin's hash before it runs. Show them the hash `just build` printed.
 - Never ask for, accept, store or print a private key or seed phrase. The bot makes its own keys.
-- Keep every built plugin: after each `just build`, keep a Claude artifact page listing each version and
-  its sha256, with the `.wasm` (or a zip with its source) embedded in the page as a download (artifacts
-  can't store a `.wasm` as a file), republished for each version; in a fork of
-  https://github.com/bulletxyz/bullet-bot-starter, commit each version naming its sha256.
 - Never commit keys, tokens, `.env` files or a bot's URL.

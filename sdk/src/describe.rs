@@ -135,6 +135,22 @@ impl SettingSpec {
         Self { kind: SettingKind::Int, ..Self::decimal(path, Decimal::from(default), range, help) }
     }
 
+    /// A flag setting at `path`: on or off, with its default.
+    #[must_use]
+    pub fn flag(path: &str, default: bool, help: &str) -> Self {
+        let range = Range::new(Decimal::ZERO, Decimal::ONE);
+        Self { kind: SettingKind::Flag, ..Self::int(path, u32::from(default), range, help) }
+    }
+
+    /// A choice setting at `path`: one of `choices`, `default` the index of one.
+    #[must_use]
+    pub fn choice(path: &str, choices: &[&str], default: u32, help: &str) -> Self {
+        let last = u32::try_from(choices.len().saturating_sub(1)).unwrap_or(u32::MAX);
+        let range = Range::new(Decimal::ZERO, Decimal::from(last));
+        let kind = SettingKind::Choice(choices.iter().map(|c| (*c).to_string()).collect());
+        Self { kind, ..Self::int(path, default, range, help) }
+    }
+
     #[must_use]
     pub fn tier(mut self, tier: Tier) -> Self {
         self.tier = tier;
@@ -153,3 +169,7 @@ impl SettingSpec {
         self
     }
 }
+
+#[cfg(test)]
+#[path = "describe_tests.rs"]
+mod tests;

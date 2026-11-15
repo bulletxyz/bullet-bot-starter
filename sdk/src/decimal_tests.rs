@@ -83,3 +83,12 @@ fn the_mantissa_edges_are_exact() {
         assert_eq!(decode(refused), Err(BadDecimal(refused)), "{refused:?}");
     }
 }
+
+#[test]
+fn rounding_a_size_down_needs_no_rust_decimal_dependency() {
+    let size = crate::Decimal::new(123_456_789_123, 10);
+    assert_eq!(
+        size.round_dp_with_strategy(8, crate::RoundingStrategy::ToZero).to_string(),
+        "12.34567891"
+    );
+}
