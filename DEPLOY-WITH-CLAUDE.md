@@ -4,6 +4,9 @@ Claude: follow this script exactly. You deploy the bot and hand over one link; t
 does the rest (ownership, real money or paper trading, funding, connecting Claude). Two messages in
 all.
 
+**When you give the user steps:** numbered, one action per step, the action first; the fewest words;
+caveats after, one line, or not at all; never open with what can't be done.
+
 ## Never
 
 - Ask for a wallet address, an amount of money, or real money versus paper trading.
@@ -31,9 +34,10 @@ often need loading before they show, so never tell them Railway isn't connected 
 If they are there, Railway is connected: drop the Railway link and "then say OK", send the rest, and
 go straight to step 2. Otherwise send this, word for word and nothing else:
 
-> I'll set up your own trading bot on Railway (a free $5 trial, then about $5 a month). You'll need
-> a computer and a Solana wallet with $20+ USDC and a little SOL for fees.
 > [Connect Railway](https://claude.ai/directory/connectors/railway), then say OK.
+>
+> I'll set up your own trading bot there (a free $5 trial, then about $5 a month). You'll need a
+> computer and a Solana wallet with $20+ USDC and a little SOL for fees.
 
 Their "OK" only means carry on. A new connector reaches you with their next message.
 
@@ -99,9 +103,10 @@ own URLs: your web fetch can't open them, and the user sees a red "Failed".
 
 If you can't deploy, send this and stop (the bot's page alone can't make it theirs: it needs the
 link from the logs):
-"I couldn't deploy it from here: [Deploy on Railway](https://railway.com/deploy/bullet-bot) and tap
-Deploy with nothing filled in. Once it's running, open the service's Deploy Logs, copy the line that
-starts "This bot has no owner yet" and paste it here."
+"I couldn't deploy it from here. Do this:
+1. [Deploy on Railway](https://railway.com/deploy/bullet-bot) and tap Deploy, nothing filled in.
+2. Once it's running, open the service's Deploy Logs.
+3. Copy the line that starts "This bot has no owner yet" and paste it here."
 When they paste it, check it as in 5. If Railway's tools can read the service, `<domain>` is its
 domain as there; if they can't, the host must be a Railway domain (ending in `.up.railway.app`),
 and if it isn't, ask them once to copy the line from the bot's Deploy Logs on Railway. Then send
@@ -113,9 +118,9 @@ Your whole reply is this message, word for word, with the link from step 2
 (`https://<domain>/#claim=<code>`): no line before it, nothing after it, no workspace or project
 names:
 
-> Your bot is running. [Open your bot](<that link>) to make it yours and start it. Bookmark your
-> bot's page: it's where you'll manage your bot. Once you've connected Claude there, come back to this
-> chat and ask me how it's doing.
+> 1. [Open your bot](<that link>) and make it yours with your wallet.
+> 2. Connect Claude there, and bookmark the page: it's where you manage your bot.
+> 3. Come back to this chat and ask me how it's doing.
 
 That ends the onboarding. The bot's page can't reopen this chat (its New Claude chat starts one). Later, if
 the bot's tools are here, say once before your first call to one: "Claude will ask to let Bullet

@@ -1,19 +1,26 @@
 //! __NAME__: one post-only buy `spacing_bps` under the mid and one sell over it, `order_size`
-//! each. A side that fills, is refused or is cancelled is placed again on the next book. At stop
-//! it cancels everything it placed. Start here: change `quote` and `on_event`, keep the tests
-//! green (`just test`), then `just build __NAME__`.
+//! each, while the position stays within `max_position` either way. When the mid moves a full
+//! spacing away from a resting order, that order is cancelled and placed again at the new price.
+//! A side is free again once its order is filled in full (partial fills add up), refused,
+//! cancelled, or missing from a fresh venue read. At stop it cancels everything it placed. Start
+//! here: change `quote` and `on_event`, keep the tests green (`just test`), then `just build
+//! __NAME__`. What every type holds: `docs/SDK.md`.
 //!
 //! The bot runs it behind its own safety layer: every order passes the owner's limits, paper
 //! trading is the default, and the daily loss stop applies. A strategy only returns intents.
 
 use bb_strategy_sdk::{
-    Decimal, Describe, Descriptor, Event, FromSettings, Intent, Loosening, NewOrder, OrderBook,
-    OrderStatus, OrderType, Range, ReportField, SettingSpec, Side, StrategyAdapter, StrategyError,
-    StrategyReport, Tier, View,
+    CancelOrder, Decimal, Describe, Descriptor, Event, FromSettings, Intent, Loosening, NewOrder,
+    OrderBook, OrderStatus, OrderType, Range, ReportField, SettingSpec, Side, StrategyAdapter,
+    StrategyError, StrategyReport, Tier, View,
 };
 use serde::{Deserialize, Serialize};
 
-/// The settings, as JSON (the bot passes the owner's `[strategies.<plugin>]` section).
+/// How long a venue read may still miss an order just sent or cancelled (ms): only a read that
+/// started this long after it decides the order is gone.
+pub const LIST_LAG_MS: u64 = 30_000;
+
+/// The settings, as JSON (the bot passes the owner's settings for this plugin).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
@@ -21,13 +28,29 @@ pub struct Settings {
     pub spacing_bps: Decimal,
     /// Size of each order.
     pub order_size: Decimal,
+    /// The largest position it builds, long or short: a side that would pass it is not placed.
+    pub max_position: Decimal,
 }
 
-/// The strategy's state: the client id resting on each side (buy, sell), if any.
+/// One side's order: what was sent and how much of it has filled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Quote {
+    client_id: String,
+    price: Decimal,
+    filled: Decimal,
+    /// When it was placed, or when its cancel was sent (the bot's clock, ms).
+    sent_ms: u64,
+    /// A cancel was sent and the order is not gone yet.
+    cancelling: bool,
+}
+
+/// The strategy's state: the order on each side (buy, sell), if any.
 #[derive(Debug)]
 pub struct __TYPE__ {
     settings: Settings,
-    resting: [Option<String>; 2],
+    quotes: [Option<Quote>; 2],
+    /// The bot's clock at start: every client id begins with it, so ids never repeat across runs.
+    started_ms: u64,
     next_id: u64,
     fills: u64,
 }
@@ -42,16 +65,14 @@ fn slot(side: Side) -> usize {
 impl __TYPE__ {
     fn next_client_id(&mut self) -> String {
         self.next_id = self.next_id.saturating_add(1);
-        format!("__NAME__-{}", self.next_id)
+        format!("{}-{}", self.started_ms, self.next_id)
     }
 
     /// The price for `side`: `spacing_bps` from the mid, on the tick when the venue gives one.
     fn price(&self, side: Side, mid: Decimal, tick: Option<Decimal>) -> Option<Decimal> {
-        let offset =
-            mid.checked_mul(self.settings.spacing_bps)?.checked_div(Decimal::from(10_000))?;
         let raw = match side {
-            Side::Buy => mid.checked_sub(offset)?,
-            Side::Sell => mid.checked_add(offset)?,
+            Side::Buy => mid.checked_sub(self.spacing(mid)?)?,
+            Side::Sell => mid.checked_add(self.spacing(mid)?)?,
         };
         let price = match tick.filter(|t| *t > Decimal::ZERO) {
             Some(t) => {
@@ -64,40 +85,101 @@ impl __TYPE__ {
         (price > Decimal::ZERO).then_some(price)
     }
 
-    /// Place each side that has nothing resting.
+    /// `spacing_bps` of `mid`, in price.
+    fn spacing(&self, mid: Decimal) -> Option<Decimal> {
+        mid.checked_mul(self.settings.spacing_bps)?.checked_div(Decimal::from(10_000))
+    }
+
+    /// Whether one more order on `side` keeps the position within `max_position`.
+    fn room(&self, side: Side, position: Decimal) -> bool {
+        let after = match side {
+            Side::Buy => position.checked_add(self.settings.order_size),
+            Side::Sell => position.checked_sub(self.settings.order_size),
+        };
+        after.is_some_and(|p| p.abs() <= self.settings.max_position)
+    }
+
+    /// Place each free side, and cancel an order the mid has moved a full spacing away from (it
+    /// is placed again at the new price once the venue says it is cancelled).
     fn quote(&mut self, view: &View<'_>) -> Vec<Intent> {
         // The venue or the bot refuses new orders for now: wait.
         if view.venue_halt.is_some() || view.path_stop.is_some() {
             return Vec::new();
         }
         let Some(mid) = view.book.and_then(OrderBook::midpoint) else { return Vec::new() };
+        let Some(spacing) = self.spacing(mid) else { return Vec::new() };
         let mut out = Vec::new();
         for side in [Side::Buy, Side::Sell] {
-            if self.resting[slot(side)].is_some() {
-                continue;
+            let Some(target) = self.price(side, mid, view.market.tick_size) else { continue };
+            let room = self.room(side, view.position);
+            match &mut self.quotes[slot(side)] {
+                Some(q)
+                    if !q.cancelling
+                        && q.price.checked_sub(target).is_some_and(|gap| gap.abs() >= spacing) =>
+                {
+                    q.cancelling = true;
+                    q.sent_ms = view.now_ms;
+                    // By client id: the order id stays empty.
+                    out.push(Intent::Cancel(CancelOrder {
+                        symbol: view.symbol.to_owned(),
+                        order_id: String::new(),
+                        client_id: Some(q.client_id.clone()),
+                    }));
+                }
+                None if room => {
+                    let client_id = self.next_client_id();
+                    self.quotes[slot(side)] = Some(Quote {
+                        client_id: client_id.clone(),
+                        price: target,
+                        filled: Decimal::ZERO,
+                        sent_ms: view.now_ms,
+                        cancelling: false,
+                    });
+                    out.push(Intent::Place(NewOrder {
+                        symbol: view.symbol.to_owned(),
+                        side,
+                        order_type: OrderType::PostOnly,
+                        price: target,
+                        quantity: self.settings.order_size,
+                        client_id: Some(client_id),
+                        reduce_only: false,
+                        protect: None,
+                    }));
+                }
+                // Its cancel is out, or the order rests near enough, or there is no room.
+                _ => {}
             }
-            let Some(price) = self.price(side, mid, view.market.tick_size) else { continue };
-            let client_id = self.next_client_id();
-            self.resting[slot(side)] = Some(client_id.clone());
-            out.push(Intent::Place(NewOrder {
-                symbol: view.symbol.to_owned(),
-                side,
-                order_type: OrderType::PostOnly,
-                price,
-                quantity: self.settings.order_size,
-                client_id: Some(client_id),
-                reduce_only: false,
-                protect: None,
-            }));
         }
         out
     }
 
+    /// The slot of the order that carries `client_id`.
+    fn slot_of(&self, client_id: Option<&str>) -> Option<usize> {
+        let id = client_id?;
+        self.quotes.iter().position(|q| q.as_ref().is_some_and(|q| q.client_id == id))
+    }
+
     /// Free the side whose order carries `client_id`.
     fn free(&mut self, client_id: Option<&str>) {
-        for r in &mut self.resting {
-            if r.is_some() && r.as_deref() == client_id {
-                *r = None;
+        if let Some(at) = self.slot_of(client_id) {
+            self.quotes[at] = None;
+        }
+    }
+
+    /// A fresh venue read: an order it omits, sent long enough before the read began, is gone (it
+    /// never landed, or its end was missed); one it lists still rests, so a cancel that did not
+    /// take is sent again on the next book.
+    fn reconcile(&mut self, view: &View<'_>) {
+        let (Some(open), Some(read_ms)) = (view.open_orders, view.read_started_ms) else { return };
+        for q in &mut self.quotes {
+            let Some(quote) = q.as_mut() else { continue };
+            if read_ms < quote.sent_ms.saturating_add(LIST_LAG_MS) {
+                continue;
+            }
+            if open.iter().any(|o| o.client_id.as_deref() == Some(quote.client_id.as_str())) {
+                quote.cancelling = false;
+            } else {
+                *q = None;
             }
         }
     }
@@ -107,41 +189,59 @@ impl StrategyAdapter for __TYPE__ {
     type Report = Report;
 
     fn start(&mut self, view: &View<'_>) -> Result<Vec<Intent>, StrategyError> {
+        self.started_ms = view.now_ms;
         Ok(self.quote(view))
     }
 
     fn on_event(&mut self, event: &Event, view: &View<'_>) -> Vec<Intent> {
         match event {
             Event::Book => self.quote(view),
+            Event::Tick => {
+                self.reconcile(view);
+                self.quote(view)
+            }
             Event::Fill(trade) => {
-                // This template frees a side on any fill; a real one tracks partial fills.
                 self.fills = self.fills.saturating_add(1);
-                self.free(trade.client_id.as_deref());
+                if let Some(at) = self.slot_of(trade.client_id.as_deref())
+                    && let Some(q) = self.quotes[at].as_mut()
+                {
+                    q.filled = q.filled.saturating_add(trade.quantity);
+                    // A partial fill keeps the side taken: the rest of the order still rests.
+                    if q.filled >= self.settings.order_size {
+                        self.quotes[at] = None;
+                    }
+                }
                 Vec::new()
             }
             Event::Outcome { intent: Intent::Place(order), result } if !result.success => {
                 self.free(order.client_id.as_deref());
                 Vec::new()
             }
+            // The venue says the order ended (a cancel is confirmed here, not by its outcome):
+            // the side is free and placed again at once.
             Event::Order(order)
-                if matches!(order.status, OrderStatus::Cancelled | OrderStatus::Rejected) =>
+                if matches!(
+                    order.status,
+                    OrderStatus::Cancelled | OrderStatus::Rejected | OrderStatus::Filled
+                ) =>
             {
                 self.free(order.client_id.as_deref());
-                Vec::new()
+                self.quote(view)
             }
-            // An order whose outcome is unknown may rest: its side stays taken. The ladder example
-            // shows how to free it after a venue read (`strategies/ladder/src/retry.rs`).
+            // An order whose outcome is unknown may rest or have filled, and a refused cancel may
+            // have left it resting: its side stays taken until its events come or a fresh read
+            // settles it (`reconcile`).
             _ => Vec::new(),
         }
     }
 
     fn stop(&mut self, _view: &View<'_>) -> Vec<Intent> {
-        self.resting = [None, None];
+        self.quotes = [None, None];
         vec![Intent::CancelAll]
     }
 
     fn report(&self) -> Report {
-        Report { resting: self.resting.iter().filter(|r| r.is_some()).count(), fills: self.fills }
+        Report { resting: self.quotes.iter().filter(|q| q.is_some()).count(), fills: self.fills }
     }
 }
 
@@ -177,7 +277,10 @@ impl FromSettings for __TYPE__ {
         if settings.order_size <= Decimal::ZERO {
             return Err(StrategyError("__NAME__: order_size must be above 0".into()));
         }
-        Ok(Self { settings, resting: [None, None], next_id: 0, fills: 0 })
+        if settings.max_position < settings.order_size {
+            return Err(StrategyError("__NAME__: max_position must be at least order_size".into()));
+        }
+        Ok(Self { settings, quotes: [None, None], started_ms: 0, next_id: 0, fills: 0 })
     }
 }
 
@@ -188,9 +291,9 @@ impl Describe for __TYPE__ {
 
     fn describe() -> Descriptor {
         Descriptor {
-            summary:
-                "One post-only buy under the mid and one sell over it, placed again when filled."
-                    .into(),
+            summary: "One post-only buy under the mid and one sell over it, moved with the mid, \
+                      within a largest position."
+                .into(),
             settings: vec![
                 SettingSpec::decimal(
                     "spacing_bps",
@@ -204,6 +307,15 @@ impl Describe for __TYPE__ {
                     Decimal::new(1, 3),
                     Range::default(),
                     "Size of each order.",
+                )
+                .tier(Tier::Limit)
+                .loosening(Loosening::Up)
+                .required(),
+                SettingSpec::decimal(
+                    "max_position",
+                    Decimal::new(5, 3),
+                    Range::default(),
+                    "The largest position it builds, long or short.",
                 )
                 .tier(Tier::Limit)
                 .loosening(Loosening::Up)

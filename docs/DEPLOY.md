@@ -2,7 +2,7 @@
 
 [Deploy with Claude](../README.md#1-get-your-bot) puts your bot on Railway for you. To run it on your
 own server instead, use the bot's public image, `ghcr.io/bulletxyz/bullet-bots` (linux/amd64 and
-linux/arm64). `:latest` follows the newest release; pin a release tag such as `:v43` where an
+linux/arm64). `:latest` follows the newest release; pin a release tag such as `:v<N>` where an
 unplanned upgrade matters.
 
 ```sh

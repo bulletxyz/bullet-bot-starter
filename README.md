@@ -35,20 +35,17 @@ Built in: the market maker (start here), grid and RSI momentum.
 
 ## 3. Make your own strategy
 
-[![Build a strategy with Claude][badge2]][build]
+[![Build a strategy with Claude Code][badge2]][build]
 
-[badge2]: https://img.shields.io/badge/Build%20a%20strategy-Claude-D97757?logo=claude&logoColor=white
-[build]: https://claude.ai/new?q=Build%20a%20strategy%20plugin%20for%20my%20Bullet%20bot%20and%20install%20it%20on%20paper.%20Follow%20this%20guide%3A%20https%3A%2F%2Fgithub.com%2Fbulletxyz%2Fbullet-bot-starter%2Fblob%2Fmain%2Fskills%2Fbullet-wasm-plugin%2FSKILL.md
+[badge2]: https://img.shields.io/badge/Build%20a%20strategy-Claude%20Code-D97757?logo=claude&logoColor=white
+[build]: https://claude.ai/code?prompt=Build%20a%20strategy%20plugin%20for%20my%20Bullet%20bot%20and%20install%20it%20on%20paper.%20Follow%20this%20guide%3A%20https%3A%2F%2Fraw.githubusercontent.com%2Fbulletxyz%2Fbullet-bot-starter%2Fmain%2Fskills%2Fbullet-wasm-plugin%2FSKILL.md
 
-Tell Claude what your strategy should do. Claude writes it from this repo's template, builds it
-and sends it to your bot. Nothing runs until your wallet signs it, and it starts on paper.
+1. Connect your bot to Claude first (step 1).
+2. Click the button, send, and say what your strategy should do. Claude Code builds it from this repo's template.
+3. If Claude asks, allow your bot's address in network access (a few clicks, it shows you how).
+4. Approve the plugin with your wallet. It starts on paper.
 
-Before you start: your bot is connected to Claude (step 1), and in Claude on the web or desktop,
-*Settings > Capabilities > Code execution* allows package managers, `static.rust-lang.org`,
-`github.com` and your bot's address.
-
-On your own computer instead: [Make a strategy](docs/MAKE-A-STRATEGY.md), then
-[install it](docs/INSTALL.md).
+By hand instead: [Make a strategy](docs/MAKE-A-STRATEGY.md), then [install it](docs/INSTALL.md).
 
 ## How your money stays safe
 
@@ -65,7 +62,7 @@ On your own computer instead: [Make a strategy](docs/MAKE-A-STRATEGY.md), then
 |---|---|
 | [strategies/](strategies/) | Example plugins: [ladder](strategies/ladder/), and the bot's grid and RSI momentum ported |
 | [templates/strategy/](templates/strategy/) | What a new strategy starts from |
-| [sdk/](sdk/) | The strategy SDK |
+| [sdk/](sdk/) | The strategy SDK ([cheat sheet](docs/SDK.md)) |
 | [skills/bullet-wasm-plugin/](skills/bullet-wasm-plugin/SKILL.md) | The guide Claude follows to build and install a plugin |
 
 ## Risk
