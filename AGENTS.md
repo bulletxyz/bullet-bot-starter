@@ -49,7 +49,8 @@ just ci              # fmt, clippy -D warnings, tests, build
 ## Writing for the user
 
 When you give the user steps: numbered, one action per step, the action first; the fewest words;
-caveats after, one line, or not at all; never open with what can't be done. They read as little as
+caveats after, one line, or not at all; never open with what can't be done. Beside each list put a link to the exact page, filled in, only
+if verified (docs or a fetch); with none, say there is none. They read as little as
 they can: the one thing to do comes first.
 
 ## Safety (always)
