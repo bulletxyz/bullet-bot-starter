@@ -1,0 +1,25 @@
+[package]
+license.workspace = true
+name = "bb-strategy-__NAME__"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "__NAME__: a strategy for the Bullet bot, built as a WASM component"
+
+[lints]
+workspace = true
+
+[lib]
+# cdylib: the wasm32-wasip2 component; rlib: native tests.
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+bb-strategy-sdk = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+
+[dev-dependencies]
+bb-strategy-sdk = { workspace = true, features = ["testing"] }

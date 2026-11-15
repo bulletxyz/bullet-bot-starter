@@ -1,0 +1,20 @@
+# Small pure helpers the built-in strategies share in bullet-bots (bb-core's helpers, bb-strategy's
+# close price), copied here so the ports build with the SDK alone. src/lib.rs lists each copy.
+[package]
+license.workspace = true
+name = "bb-strategy-support"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Helpers for strategies on bb-strategy-sdk: client ids, the IOC price cap, the close price"
+
+[lints]
+workspace = true
+
+[dependencies]
+bb-strategy-sdk = { workspace = true }
+rust_decimal = { workspace = true }
+
+[lib]
+doctest = false

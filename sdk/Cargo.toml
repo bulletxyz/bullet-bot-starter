@@ -1,0 +1,28 @@
+# The guest SDK: what a strategy is written against, natively or as a WASM component
+# (wasm32-wasip2, the `bb:strategy` world in wit/). Pure: no tokio, no I/O, no clock.
+# The bot's WASM host generates its bindings from wit/ here (`SOURCE_DIR`), at a pinned commit.
+[package]
+license.workspace = true
+name = "bb-strategy-sdk"
+version = "0.5.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The guest SDK for Bullet bot strategies: the port, its data types and the bb:strategy WIT export"
+
+[lints]
+workspace = true
+
+[features]
+# Helpers for a strategy's own tests: books, views, a small simulated host.
+testing = []
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+rust_decimal = { workspace = true }
+schemars = { workspace = true }
+wit-bindgen = { version = "=0.63.0", default-features = false, features = ["macros", "realloc", "std"] }
+
+[lib]
+doctest = false
