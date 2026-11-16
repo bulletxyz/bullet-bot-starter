@@ -336,6 +336,7 @@ impl OwnedView {
             path_stop: self.path_stop.as_deref(),
             read_started_ms: self.read_started_ms,
             limits: None,
+            stop: None,
         }
     }
 }

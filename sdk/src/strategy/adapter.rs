@@ -277,6 +277,9 @@ pub struct View<'a> {
     /// The hard limits the host holds the order path to (native only; `None` for a plugin), live:
     /// a paper run leaves it `None`, so a paper cap nobody chose refuses no plan.
     pub limits: Option<LimitsInForce>,
+    /// The host's own stop, typed (native only; `None` for a plugin): what `path_stop` says in
+    /// words, so a strategy can tell a daily loss stop from a pause.
+    pub stop: Option<&'a StopReason>,
 }
 
 /// The venue's facts about the market, when it reports them.

@@ -53,6 +53,7 @@ fn view() -> View<'static> {
         path_stop: None,
         read_started_ms: None,
         limits: None,
+        stop: None,
         market: MarketFacts::default(),
         legs: &[],
     }

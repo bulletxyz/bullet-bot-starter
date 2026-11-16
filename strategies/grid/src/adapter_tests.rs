@@ -72,6 +72,7 @@ fn at<'a>(book: Option<&'a OrderBook>, open: &'a [Order], now_ms: u64, pos: Deci
         path_stop: None,
         read_started_ms: None,
         limits: None,
+        stop: None,
         market: MarketFacts::default(),
         legs: &[],
     }

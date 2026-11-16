@@ -61,6 +61,7 @@ fn view<'a>(
         path_stop: None,
         read_started_ms,
         limits: None,
+        stop: None,
         market: MarketFacts::default(),
         legs: &[],
     }

@@ -66,6 +66,7 @@ pub struct Market {
     pub path_stop: Option<String>,
     pub read_started_ms: Option<u64>,
     pub limits: Option<crate::LimitsInForce>,
+    pub stop: Option<crate::stops::StopReason>,
 }
 
 impl Market {
@@ -99,6 +100,7 @@ impl Market {
             path_stop: self.path_stop.as_deref(),
             read_started_ms: self.read_started_ms,
             limits: self.limits.clone(),
+            stop: self.stop.as_ref(),
         }
     }
 }

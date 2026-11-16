@@ -39,6 +39,8 @@ struct ViewJson {
     read_started_ms: Option<u64>,
     #[serde(default)]
     limits: Option<LimitsInForce>,
+    #[serde(default)]
+    stop: Option<bb_strategy_sdk::stops::StopReason>,
     market: MarketFacts,
     #[serde(default)]
     legs: Vec<Value>,
@@ -65,6 +67,7 @@ impl ViewJson {
             path_stop: self.path_stop,
             read_started_ms: self.read_started_ms,
             limits: self.limits,
+            stop: self.stop,
         })
     }
 }

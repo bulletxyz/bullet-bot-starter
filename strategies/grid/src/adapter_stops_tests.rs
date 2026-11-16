@@ -113,6 +113,27 @@ fn the_daily_loss_stop_flattens_and_stops_the_grid() {
     assert_eq!(closes(&out), [(Side::Sell, d("1"), true, OrderType::Market)]);
 }
 
+/// The host's daily loss stop, shown in the view, stops the grid as the build's closure does; any
+/// other stop of the host's (a pause, a stale price) leaves the grid to hold, as the path does.
+#[test]
+fn the_hosts_daily_loss_stop_in_the_view_flattens_and_stops_the_grid() {
+    use bb_strategy_sdk::stops::StopReason;
+    let (mut grid, _) = running(test_config());
+    let b = mid_book();
+    let paused = StopReason::Paused;
+    let held = grid
+        .on_event(&Event::Tick, &View { stop: Some(&paused), ..at(Some(&b), &[], NOON, d("1")) });
+    assert!(held.iter().all(|i| !matches!(i, Intent::CancelAll)), "{held:?}");
+    let loss = StopReason::DailyLoss { day: bb_strategy_sdk::stops::utc_day(NOON) };
+    let out = grid.on_event(
+        &Event::Tick,
+        &View { stop: Some(&loss), ..at(Some(&b), &[], NOON + 5_000, d("1")) },
+    );
+    assert!(matches!(out[0], Intent::CancelAll), "{out:?}");
+    assert_eq!(closes(&out), [(Side::Sell, d("1"), true, OrderType::Market)]);
+    assert!(report(&grid)["stopped"].as_str().unwrap().contains("daily loss"));
+}
+
 /// A daily loss stop's cancel that failed is asked again market-wide, a hard stop's as its own.
 #[test]
 fn a_failed_daily_loss_cancel_is_asked_again_market_wide() {

@@ -32,6 +32,7 @@ fn entries(venue_position: Option<Decimal>) -> usize {
         path_stop: None,
         read_started_ms: None,
         limits: None,
+        stop: None,
         market: market.clone(),
         legs: &[],
     };

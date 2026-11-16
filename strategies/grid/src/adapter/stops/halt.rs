@@ -1,3 +1,4 @@
+use bb_strategy_sdk::stops::StopReason;
 use bb_strategy_sdk::{Intent, NewOrder, OrderBook, OrderType, Side, View};
 use bb_strategy_support::ioc::{MAX_IOC_BPS_FROM_MID, capped_ioc_price, two_sided_mid};
 use bb_strategy_support::touch;
@@ -10,8 +11,12 @@ impl GridStrategy {
     /// grid's own stop, a normal one: its state is trusted and it ends its own trading, so only its
     /// own orders go ([`Intent::CancelOwn`]; the owner's on the market stay). The daily loss stop
     /// is a safety stop: every order on the market goes ([`Intent::CancelAll`]), as the path's
-    /// halt for it.
-    fn stop_reason(&self, mid: Option<Decimal>) -> Option<(String, Intent)> {
+    /// halt for it: the host's (`View::stop`), or the build's closure.
+    fn stop_reason(
+        &self,
+        mid: Option<Decimal>,
+        host: Option<&StopReason>,
+    ) -> Option<(String, Intent)> {
         let plan = self.plan.as_ref()?;
         if let Some(mid) = mid {
             if let Some(stop) = plan.stop_below
@@ -27,7 +32,8 @@ impl GridStrategy {
                 return Some((why, Intent::CancelOwn));
             }
         }
-        if self.day_stop.as_ref().is_some_and(|tripped| tripped()) {
+        let day_stop = matches!(host, Some(StopReason::DailyLoss { .. }));
+        if day_stop || self.day_stop.as_ref().is_some_and(|tripped| tripped()) {
             return Some(("daily loss stop".into(), Intent::CancelAll));
         }
         None
@@ -75,7 +81,7 @@ impl GridStrategy {
             return Some(self.close(view, attempt).into_iter().collect());
         }
         let mid = view.book.and_then(OrderBook::midpoint);
-        let (reason, pull) = self.stop_reason(mid)?;
+        let (reason, pull) = self.stop_reason(mid, view.stop)?;
         tracing::warn!(%reason, position = %view.position, "Grid stopping: cancel and close");
         self.state.clear_all();
         // Only the hard stop pulls its own orders; the loss watch holds a daily loss trip.
