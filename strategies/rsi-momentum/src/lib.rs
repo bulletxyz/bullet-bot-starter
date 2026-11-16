@@ -13,6 +13,7 @@
 pub mod adapter;
 pub mod config;
 pub mod decide;
+mod describe;
 pub mod indicator;
 pub mod limits;
 pub mod report;

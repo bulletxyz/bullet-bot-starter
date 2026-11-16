@@ -141,6 +141,33 @@ impl SettingSpec {
     }
 }
 
+/// A built-in's [`Setting`](crate::Setting) as the wire form a [`Descriptor`] lists.
+impl From<&crate::Setting> for SettingSpec {
+    fn from(s: &crate::Setting) -> Self {
+        use crate::param_spec::ParamKind;
+        let words = |w: &[&str]| w.iter().map(|s| (*s).to_string()).collect();
+        let p = &s.spec;
+        Self {
+            path: s.path.clone(),
+            kind: match p.kind {
+                ParamKind::Decimal => SettingKind::Decimal,
+                ParamKind::Int => SettingKind::Int,
+                ParamKind::Bool => SettingKind::Flag,
+                ParamKind::Enum { choices } => SettingKind::Choice(words(choices)),
+                ParamKind::Text { default } => SettingKind::Text(default.into()),
+                ParamKind::List { default } => SettingKind::Words(words(default)),
+            },
+            default: p.default,
+            guarded: p.guarded,
+            hard: p.hard,
+            help: p.help.into(),
+            tier: p.tier,
+            loosening: p.loosening,
+            required: s.required,
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "describe_tests.rs"]
 mod tests;

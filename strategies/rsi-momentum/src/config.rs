@@ -7,13 +7,14 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 
 /// User-facing knobs for RSI momentum on one Bullet market.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RsiMomentumConfig {
     /// The Bullet market traded.
     pub symbol: String,
     /// Candle length.
     #[serde(default = "d_interval", deserialize_with = "by_name")]
+    #[schemars(with = "String")]
     pub interval: CandleInterval,
     /// RSI lookback in candles (Wilder smoothing).
     #[serde(default = "d_period")]

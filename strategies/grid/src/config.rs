@@ -16,7 +16,7 @@ use crate::derive::{ATR_PERIOD, Direction, RangePreset};
 ///
 /// When a buy at level `N` fills the grid places a sell at `N+1`; when a sell at `M` fills it
 /// places a buy at `M-1`. Profit per round trip is `spacing × order_size`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GridConfig {
     /// Broker to trade against: always `"bullet"`.
@@ -33,10 +33,12 @@ pub struct GridConfig {
 
     /// `neutral` starts flat; `long` / `short` open the position the far side's levels close.
     #[serde(default)]
+    #[schemars(with = "String")]
     pub direction: Direction,
 
     /// How wide the derived range is (the lookback of the volatility that sets it).
     #[serde(default)]
+    #[schemars(with = "String")]
     pub range: RangePreset,
 
     /// Lower bound of the grid (absolute price); derived when omitted.
@@ -61,6 +63,7 @@ pub struct GridConfig {
 
     /// `"post_only"` (default: a level that would cross goes at the touch), `"limit"`, `"market"`.
     #[serde(default = "default_order_type")]
+    #[schemars(with = "String")]
     pub order_type: OrderType,
 
     /// The grid's own position cap (base units); the worst case must fit it.
@@ -82,7 +85,7 @@ pub struct GridConfig {
     pub trend_filter: Option<TrendFilterConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GridFees {
     pub maker_bps: Decimal,
@@ -92,7 +95,7 @@ pub struct GridFees {
     pub min_spacing_fee_multiplier: Decimal,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TrendFilterConfig {
     #[serde(default = "default_fast_secs")]
