@@ -65,6 +65,7 @@ pub struct Market {
     pub legs: Vec<LegView>,
     pub path_stop: Option<String>,
     pub read_started_ms: Option<u64>,
+    pub limits: Option<crate::LimitsInForce>,
 }
 
 impl Market {
@@ -97,6 +98,7 @@ impl Market {
             legs: &self.legs,
             path_stop: self.path_stop.as_deref(),
             read_started_ms: self.read_started_ms,
+            limits: self.limits.clone(),
         }
     }
 }

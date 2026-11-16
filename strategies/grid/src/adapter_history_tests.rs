@@ -67,6 +67,7 @@ fn view(book: &OrderBook) -> View<'_> {
         venue_halt: None,
         path_stop: None,
         read_started_ms: None,
+        limits: None,
         market: MarketFacts {
             tick_size: Some(d("0.001")),
             step_size: Some(d("0.01")),

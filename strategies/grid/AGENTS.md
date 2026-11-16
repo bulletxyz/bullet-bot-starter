@@ -5,7 +5,7 @@ only the level state and returns `Intent`s; the bot's strategy host places them 
 the book, the venue reads, paper and the snapshot. The bot reads the price history when the range or the levels are
 derived: its build passes it (`with_history`), or its host loads the daily and hourly candles the grid lists in
 `histories()` (a load that fails refuses the start with the host's reason), and passes the hard limits (`limits.max_position`,
-`limits.max_notional_usd`, live only) and the daily loss stop. The mode is the bot's (paper until the owner's
+`limits.max_notional_usd`, live only; `View::limits` when its host shows them, else the build's `with_limits`) and the daily loss stop. The mode is the bot's (paper until the owner's
 signed go-live), as for every strategy.
 
 The candles: Binance's USDT-M perp first. It refuses US addresses (HTTP 451; 403 too), and many bots run in US

@@ -52,6 +52,7 @@ fn view() -> View<'static> {
         venue_halt: None,
         path_stop: None,
         read_started_ms: None,
+        limits: None,
         market: MarketFacts::default(),
         legs: &[],
     }

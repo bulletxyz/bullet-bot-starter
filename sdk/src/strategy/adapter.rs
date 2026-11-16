@@ -274,6 +274,9 @@ pub struct View<'a> {
     /// `None` with no fresh read. A strategy that decides on what a read omits compares it with
     /// when the thing it asks about was sent, not with when the read reached it.
     pub read_started_ms: Option<u64>,
+    /// The hard limits the host holds the order path to (native only; `None` for a plugin), live:
+    /// a paper run leaves it `None`, so a paper cap nobody chose refuses no plan.
+    pub limits: Option<LimitsInForce>,
 }
 
 /// The venue's facts about the market, when it reports them.
@@ -295,12 +298,16 @@ pub struct LimitsInForce {
     pub max_position: Decimal,
     pub daily_loss_usd: Decimal,
     pub stale_secs: Option<u64>,
+    /// The most notional (USD) the path holds open, when there is a cap (left out of the JSON
+    /// when there is none).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_notional_usd: Option<Decimal>,
 }
 
 impl LimitsInForce {
     #[must_use]
     pub fn new(max_position: Decimal, daily_loss_usd: Decimal, stale_secs: Option<u64>) -> Self {
-        Self { max_position, daily_loss_usd, stale_secs }
+        Self { max_position, daily_loss_usd, stale_secs, max_notional_usd: None }
     }
 }
 
@@ -486,3 +493,7 @@ impl fmt::Display for StrategyError {
 }
 
 impl std::error::Error for StrategyError {}
+
+#[cfg(test)]
+#[path = "adapter_tests.rs"]
+mod tests;

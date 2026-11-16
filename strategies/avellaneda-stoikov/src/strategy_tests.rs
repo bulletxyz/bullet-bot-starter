@@ -60,6 +60,7 @@ fn view<'a>(
         venue_halt: None,
         path_stop: None,
         read_started_ms,
+        limits: None,
         market: MarketFacts::default(),
         legs: &[],
     }

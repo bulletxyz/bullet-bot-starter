@@ -36,6 +36,7 @@ the checkout, not file by file over the web.
 | `venue_halt`, `path_stop` | Why the venue, or the bot's own order path (its stop), refuses new orders now. While either is `Some`, don't quote. |
 | `market` | `tick_size`, `step_size`, `maker_fee_bps`, `taker_fee_bps`, `fee_tier`, `venue_name` (each optional). |
 | `legs` | Other venue accounts the strategy declared (`Descriptor::legs`); empty for one market. |
+| `limits` | The bot's built-ins only (`None` for a plugin): the hard limits the bot holds the orders to, live. |
 
 ## `Event`: what happens
 

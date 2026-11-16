@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use bb_strategy_sdk::{
-    Event, Intent, MarketFacts, NewOrder, Order, OrderBook, OrderResult, OrderStatus, OrderType,
-    Side, StrategyAdapter, Trade, View,
+    Event, Intent, LimitsInForce, MarketFacts, NewOrder, Order, OrderBook, OrderResult,
+    OrderStatus, OrderType, Side, StrategyAdapter, Trade, View,
 };
 use rust_decimal::Decimal;
 
@@ -71,6 +71,7 @@ fn at<'a>(book: Option<&'a OrderBook>, open: &'a [Order], now_ms: u64, pos: Deci
         venue_halt: None,
         path_stop: None,
         read_started_ms: None,
+        limits: None,
         market: MarketFacts::default(),
         legs: &[],
     }
@@ -282,6 +283,34 @@ fn start_refuses_a_worst_case_past_the_hard_limits() {
     assert!(GridStrategy::new(mine).start(&view(Some(&b), &[], NOON)).is_err());
     let fits = HardLimits { max_position: Some(d("3")), max_notional_usd: Some(d("231")) };
     GridStrategy::new(test_config()).with_limits(fits).start(&view(Some(&b), &[], NOON)).unwrap();
+}
+
+/// The limits the host holds the path to, shown in the view, refuse the same plans as the build's;
+/// they win over the build's when both are given.
+#[test]
+fn the_limits_in_the_view_refuse_a_worst_case_past_them_as_the_builds_do() {
+    let b = mid_book();
+    let start = |limits: LimitsInForce, built: Option<HardLimits>| {
+        let mut grid = GridStrategy::new(test_config());
+        if let Some(built) = built {
+            grid = grid.with_limits(built);
+        }
+        grid.start(&View { limits: Some(limits), ..view(Some(&b), &[], NOON) })
+    };
+    let tight = LimitsInForce::new(d("2"), d("50"), None);
+    assert!(start(tight.clone(), None).unwrap_err().0.contains("position limit 2"));
+    let poor = LimitsInForce {
+        max_notional_usd: Some(d("230")),
+        ..LimitsInForce::new(d("10"), d("50"), None)
+    };
+    assert!(start(poor, None).unwrap_err().0.contains("notional limit $230"));
+    let fits = LimitsInForce {
+        max_notional_usd: Some(d("231")),
+        ..LimitsInForce::new(d("3"), d("50"), None)
+    };
+    let loose = HardLimits { max_position: Some(d("100")), max_notional_usd: None };
+    assert!(start(tight, Some(loose)).is_err());
+    start(fits, Some(HardLimits { max_position: Some(d("1")), max_notional_usd: None })).unwrap();
 }
 
 // --- Rule 5: P&L shown honestly. ---
