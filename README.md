@@ -77,7 +77,8 @@ By hand instead: [Make a strategy](docs/MAKE-A-STRATEGY.md), then [install it](d
 
 | Folder | What |
 |---|---|
-| [strategies/](strategies/) | Example plugins: [ladder](strategies/ladder/), and the bot's grid and RSI momentum ported |
+| [strategies/](strategies/) | Example plugins: [ladder](strategies/ladder/), [sma](strategies/sma/) |
+| [strategies/](strategies/) | The bot's built-ins (grid, RSI momentum, Avellaneda-Stoikov, funding), not plugins |
 | [templates/strategy/](templates/strategy/) | What a new strategy starts from |
 | [sdk/](sdk/) | The strategy SDK ([cheat sheet](docs/SDK.md)) |
 | [skills/bullet-wasm-plugin/](skills/bullet-wasm-plugin/SKILL.md) | The guide Claude follows to build and install a plugin |

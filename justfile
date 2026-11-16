@@ -8,7 +8,7 @@ default:
 build *names:
     scripts/build.sh {{names}}
 
-# Native tests: the SDK, the examples and the ports' parity with the bot's built-ins.
+# Native tests: the SDK, the examples, the built-ins and their parity replay.
 test:
     cargo test --locked --workspace
 

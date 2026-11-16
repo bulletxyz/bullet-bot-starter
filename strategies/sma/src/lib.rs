@@ -10,27 +10,13 @@ use std::collections::VecDeque;
 
 use bb_strategy_sdk::{
     CandleInterval, Decimal, Describe, Descriptor, Event, FromSettings, HistoryNeed, Intent,
-    OrderBook, Range, ReportField, SettingKind, SettingSpec, StrategyAdapter, StrategyError,
-    StrategyReport, View, Warmup,
+    MAX_FIELD_TEXT, OrderBook, Range, ReportField, SettingKind, SettingSpec, StrategyAdapter,
+    StrategyError, StrategyReport, View, Warmup,
 };
 use serde::Deserialize;
 
 /// The most bars it averages.
 pub const MAX_PERIOD: u32 = 500;
-
-/// The intervals it takes, by name, in the order its `interval` setting lists them.
-const INTERVALS: [(&str, CandleInterval); 7] = [
-    ("1m", CandleInterval::M1),
-    ("5m", CandleInterval::M5),
-    ("15m", CandleInterval::M15),
-    ("30m", CandleInterval::M30),
-    ("1h", CandleInterval::H1),
-    ("4h", CandleInterval::H4),
-    ("1d", CandleInterval::D1),
-];
-
-/// The most characters of the host's words it shows in a report text.
-const MAX_TEXT: usize = 200;
 
 /// The settings, as JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
@@ -71,15 +57,16 @@ impl Sma {
                 settings.period
             )));
         }
-        let Some((_, interval)) = INTERVALS.iter().find(|(n, _)| *n == settings.interval) else {
+        let Some(interval) = CandleInterval::parse(&settings.interval) else {
             return Err(StrategyError(format!(
-                "sma: interval must be one of 1m, 5m, 15m, 30m, 1h, 4h, 1d, got {:?}",
+                "sma: interval must be one of {}, got {:?}",
+                CandleInterval::NAMES.join(", "),
                 settings.interval
             )));
         };
         Ok(Self {
             period: settings.period,
-            interval: *interval,
+            interval,
             name: settings.interval.clone(),
             closes: VecDeque::new(),
             live: None,
@@ -135,7 +122,7 @@ fn mid(book: Option<&OrderBook>) -> Option<Decimal> {
 }
 
 fn cut(text: &str) -> String {
-    text.chars().take(MAX_TEXT).collect()
+    text.chars().take(MAX_FIELD_TEXT).collect()
 }
 
 impl Describe for Sma {
@@ -145,7 +132,7 @@ impl Describe for Sma {
     fn describe() -> Descriptor {
         let d = |n: i64| Decimal::from(n);
         let interval = SettingSpec {
-            kind: SettingKind::Choice(INTERVALS.iter().map(|(n, _)| (*n).into()).collect()),
+            kind: SettingKind::Choice(CandleInterval::NAMES.iter().map(|n| (*n).into()).collect()),
             ..SettingSpec::int("interval", 2, Range::new(d(0), d(6)), "Each bar's length.")
         };
         Descriptor {

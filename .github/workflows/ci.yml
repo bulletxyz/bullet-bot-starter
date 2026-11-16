@@ -47,8 +47,12 @@ jobs:
           fi
       - name: Lint
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
-      - name: Tests (the SDK, the examples, the ports' parity with the bot's built-ins)
+      - name: Tests (the SDK, the examples, the built-ins and their parity replay)
         run: cargo test --locked --workspace
+      - name: The built-ins build for the component target too
+        run: >-
+          cargo build --locked --target wasm32-wasip2 -p bb-strategy-grid -p bb-strategy-rsi-momentum
+          -p bb-strategy-avellaneda-stoikov -p bb-strategy-funding-arb -p bb-strategy-simple-funding
       - name: Build the components
         run: scripts/build.sh
       - name: Hashes

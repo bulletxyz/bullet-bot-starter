@@ -6,9 +6,9 @@
 use std::collections::BTreeMap;
 
 use crate::Decimal;
-use crate::adapter::{Event, Intent, MarketFacts, StrategyAdapter, StrategyError, View};
-use crate::history::{Candle, CandleInterval, Warmup};
-use crate::legs::LegView;
+use crate::history::candles::{Candle, CandleInterval, Warmup};
+use crate::host::legs::LegView;
+use crate::strategy::adapter::{Event, Intent, MarketFacts, StrategyAdapter, StrategyError, View};
 use crate::types::{NewOrder, Order, OrderBook, OrderResult, Position, Side, Trade};
 
 /// `s` as a decimal; zero when it does not parse (tests write literals).
@@ -129,9 +129,16 @@ fn client_id(intent: &Intent) -> Option<String> {
         Intent::Cancel(c) => c.client_id.clone(),
         Intent::Leg { intent, .. } => client_id(intent),
         Intent::CancelAll
+        | Intent::CancelOwn
         | Intent::Shutdown(_)
         | Intent::Flatten { .. }
-        | Intent::Request { .. } => None,
+        | Intent::Request { .. }
+        | Intent::Reply { .. }
+        | Intent::Persist(_)
+        | Intent::Notify(_)
+        | Intent::ClosePosition { .. }
+        | Intent::SetLimits(_)
+        | Intent::Targets(_) => None,
     }
 }
 
@@ -231,8 +238,27 @@ impl<S: StrategyAdapter> SimHost<S> {
                         _ => None,
                     },
                     Intent::Cancel(_) | Intent::Amend(_) | Intent::Flatten { .. } => None,
-                    // A request is answered between events: a test sends its `Event::Answer`.
-                    Intent::CancelAll | Intent::Shutdown(_) | Intent::Request { .. } => continue,
+                    // A request is answered between events: a test sends its `Event::Answer`, and
+                    // its `Event::Closed` for a close.
+                    Intent::CancelAll
+                    | Intent::CancelOwn
+                    | Intent::Shutdown(_)
+                    | Intent::Request { .. }
+                    | Intent::Reply { .. }
+                    | Intent::Notify(_)
+                    | Intent::ClosePosition { .. }
+                    | Intent::SetLimits(_)
+                    | Intent::Targets(_) => continue,
+                    // An acked write is applied at once; one nothing waits for asks no answer.
+                    Intent::Persist(write) => {
+                        if let Some(id) = write.ack {
+                            let mut view = self.market.view();
+                            view.open_orders = None;
+                            let applied = Event::Persisted { id, result: Ok(()) };
+                            next.extend(self.strategy.on_event(&applied, &view));
+                        }
+                        continue;
+                    }
                 };
                 let event = if let Some(why) = refusal {
                     outcome(intent, Err(why))

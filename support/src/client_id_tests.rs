@@ -44,3 +44,9 @@ fn starting_at_max_saturates_instead_of_overflowing() {
     assert_eq!(iss.issue(), u64::MAX.to_string());
     assert_eq!(iss.issue(), u64::MAX.to_string());
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_session_seeded_issuer_hands_out_the_bots_own_ids() {
+    assert!(is_own(&ClientIdIssuer::session_seeded().issue()));
+}

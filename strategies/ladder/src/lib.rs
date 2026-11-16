@@ -327,7 +327,13 @@ impl StrategyAdapter for Ladder {
             | Event::Outcome { .. }
             | Event::Mark(_)
             | Event::Leg { .. }
-            | Event::Answer { .. } => Vec::new(),
+            | Event::Answer { .. }
+            | Event::Reference(_)
+            | Event::Control { .. }
+            | Event::Persisted { .. }
+            | Event::Closed { .. }
+            | Event::Failed { .. }
+            | Event::MarketView(_) => Vec::new(),
         };
         self.note_time(view.now_ms);
         intents

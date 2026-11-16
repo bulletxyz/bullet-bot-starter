@@ -3,41 +3,61 @@
 //! crate a `bb:strategy@0.5.0` component when it is built for `wasm32-wasip2` (`crate-type =
 //! ["cdylib", "rlib"]`). The same code runs natively in its own tests.
 //!
-//! Pure: no tokio, no I/O, no clock. The port's shape is bb-strategy's (`StrategyAdapter`,
-//! `StrategyReport`, `View`, `Event`, `Intent`); the host converts between the two at the boundary.
+//! Pure: no tokio, no I/O, no clock. This is the one port: the bot's own built-in strategies run on
+//! the same [`StrategyAdapter`], natively, and the bot re-exports these types as its own, so a
+//! strategy is the same code in both. A plugin (a component) is sent and may return only what the
+//! `bb:strategy` world carries; the rest (`Reference`, `Control`, `Persist`, `Targets`, ...) is the
+//! bot's own, and a component that returns one faults.
 
 extern crate self as bb_strategy_sdk;
 
-mod adapter;
-mod calls;
-pub mod decimal;
-mod describe;
-#[doc(hidden)]
-pub mod guest;
+mod component;
+mod config;
+mod guards;
 mod history;
-mod legs;
+mod host;
+pub mod instance;
+mod strategy;
 #[cfg(feature = "testing")]
 pub mod testing;
 mod types;
-mod wire;
-mod wire_calls;
-mod wire_history;
 
-pub use adapter::{
-    Event, FieldValue, FromSettings, Intent, MarketFacts, PaperInputs, ReportField,
-    StrategyAdapter, StrategyError, StrategyReport, View,
+pub use component::decimal;
+#[doc(hidden)]
+pub use component::guest;
+pub use config::{param_spec, text_format};
+pub use guards::{alert_keys, stops};
+pub use host::targets;
+
+pub use config::setting::{Setting, ValidateConfig};
+pub use erased_serde::Serialize as ErasedSerialize;
+pub use history::candles::{Candle, CandleInterval, HistoryNeed, MAX_HISTORY_CANDLES, Warmup};
+pub use history::records::{
+    Fees, FillKind, FillRecord, HistoryEvent, HistoryReads, Restored, WindowMetrics,
 };
-pub use calls::{Answer, CallError, ReadQuery, VenueCall};
-pub use describe::{
+pub use host::calls::{Answer, CallError, Cause, ReadQuery, VenueCall};
+pub use host::capability::{Alert, CloseReport, LimitsUpdate, Persist, ReferencePrice};
+pub use host::control::{ControlCmd, ControlReply, LimitChanges, SettingChanges};
+pub use host::legs::{LegView, TRADE_LEG};
+pub use rust_decimal::{Decimal, RoundingStrategy};
+pub use strategy::adapter::{
+    Event, FieldValue, FromSettings, Intent, LimitsInForce, MarketFacts, OwnBook, PaperInputs,
+    ReportField, SnapshotExtras, StartMode, StateRead, StrategyAdapter, StrategyError,
+    StrategyReport, View,
+};
+pub use strategy::describe::{
     Describe, Descriptor, LegNeed, Loosening, Range, SettingKind, SettingSpec, Tier,
 };
-pub use history::{Candle, CandleInterval, HistoryNeed, MAX_HISTORY_CANDLES, Warmup};
-pub use legs::{LegView, TRADE_LEG};
-pub use rust_decimal::{Decimal, RoundingStrategy};
+pub use strategy::erased::ErasedAdapter;
+pub use strategy::report::{
+    MAX_FIELD_NAME, MAX_FIELD_TEXT, MAX_FIELD_UNIT, MAX_HEADLINE, MAX_REPORT_FIELDS, fields_json,
+    fields_of,
+};
+pub use strategy::twin::{NoHistory, TwinAdapter, TwinHistory, TwinSpec};
 pub use types::{
-    AccountEquity, AmendOrder, CancelOrder, CancelResult, FundingSample, Level, NewOrder, Order,
-    OrderBook, OrderResult, OrderStatus, OrderType, Position, Protection, Side, Trade,
-    signed_position,
+    AccountEquity, AmendOrder, Balance, CancelOrder, CancelResult, FundingSample, Level, NewOrder,
+    Order, OrderBook, OrderResult, OrderStatus, OrderType, Position, Protection, ReplaceResult,
+    Side, StopKind, Trade, VenueStop, signed_position,
 };
 
 /// The version of the `bb:strategy` world this SDK builds components for.

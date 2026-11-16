@@ -3,8 +3,6 @@
 //! a u64 `ClientOrderId` (Bullet) can parse directly, while adapters that
 //! accept arbitrary strings (HL via `cloid`) can use the same value verbatim.
 //!
-//! A copy of bb-core's `helpers::client_id` without `session_seeded` (it read the wall clock).
-//!
 //! The bot's own ids ([`ClientIdIssuer::own`], [`is_own`]) carry [`OWN_MARK`] in bits 45-52, under
 //! 2^53: a later run tells the orders a bb run left resting from the owner's own orders on the
 //! same market by the id alone, so its normal cancels take only those (an order whose outcome was
@@ -45,6 +43,32 @@ impl ClientIdIssuer {
     #[must_use]
     pub fn own(unix_ms: u64) -> Self {
         Self::starting_at(OWN_MARK << SEQ_BITS | (unix_ms.saturating_mul(10) & SEQ_MASK))
+    }
+
+    /// [`Self::own`] seeded from the current Unix epoch so that ids issued in different process
+    /// restarts don't collide. For the bot's own native code only: a component has no clock (it
+    /// seeds from the view's `now_ms`).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "seeds from the wall clock at start-up; a component never calls this"
+    )]
+    #[must_use]
+    pub fn session_seeded() -> Self {
+        let epoch_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
+        Self::own(epoch_ms)
+    }
+
+    /// On `wasm32` (a component has no clock) the sequence starts at the bot's own mark with no
+    /// time in it, so a run restarted in the same bot could repeat an id: a strategy that runs as a
+    /// component reseeds from `View::now_ms` ([`Self::own`]) at its start. It is here so the
+    /// built-ins that call it from `new` build for the component target.
+    #[cfg(target_arch = "wasm32")]
+    #[must_use]
+    pub fn session_seeded() -> Self {
+        Self::own(0)
     }
 
     /// The next id. At `u64::MAX` it keeps returning `u64::MAX` (no wrap, no panic).

@@ -6,7 +6,7 @@ plugins, and the docs for setting the bot up. No crate here depends on the bot.
 ## Build and test
 
 ```sh
-just test            # native tests: SDK, examples, the ports' parity with the bot's built-ins
+just test            # native tests: SDK, examples, the built-ins and their parity replay
 just build [name]    # dist/<name>.wasm + .sha256 (the folder name is the plugin's name)
 just new <name>      # strategies/<name>/ from templates/strategy
 just ci              # fmt, clippy -D warnings, tests, build
@@ -18,8 +18,13 @@ just ci              # fmt, clippy -D warnings, tests, build
   bot builds its WASM host against them and its tests from `strategies/ladder/`, at a pinned commit:
   keep the crate names, and a change that breaks a guest or the host is a new world version, never
   an edit of a released one.
-- `support/`: small helpers copied from the bot (client ids, the IOC price cap, the close price).
-- `strategies/<name>/`: one plugin each. `parity/`: the built-ins' recorded calls and their replay.
+- `support/`: small pure helpers the built-ins share (client ids, inventory tracker, IOC price cap, close price,
+  funding math).
+- `strategies/<name>/`: one crate each. `ladder` and `sma` are example plugins. `grid`, `rsi-momentum`,
+  `avellaneda-stoikov`, `funding-arb` and `simple-funding` are the bot's own built-ins: it imports them as git
+  dependencies and runs them natively; they also build for `wasm32-wasip2`, but are not plugins yet. `parity/`: the
+  recorded calls of the built-ins (grid, rsi-momentum) and their replay. Keep them green; a change that makes a
+  fixture differ is a change in behaviour: say so in that strategy's `AGENTS.md`.
 - `docs/`: [making](docs/MAKE-A-STRATEGY.md) and [installing](docs/INSTALL.md) a strategy, the
   [SDK cheat sheet](docs/SDK.md),
   [running the bot with Docker](docs/DEPLOY.md), the bot's [HTTP API](docs/API.md) and
@@ -34,7 +39,7 @@ just ci              # fmt, clippy -D warnings, tests, build
 - A backup download page (an artifact) uses the `downloads` capability, never a `data:` link: see
   `docs/MAKE-A-STRATEGY.md`. The zip is attached in the chat first.
 
-## A strategy
+## A plugin
 
 - Depends on `bb-strategy-sdk` (and `bb-strategy-support`) and pure crates only: no I/O, no clock
   (`View::now_ms`), no randomness, no `tracing`. Clippy denies panics and unchecked arithmetic.
@@ -43,8 +48,12 @@ just ci              # fmt, clippy -D warnings, tests, build
 - A strategy only names its settings; the bot decides where they live: `[instances.<id>.plugins.<name>]` on the bot,
   changed live at `plugins.<name>.<setting>` on an instance. Any name is fine (`max_position` too): the bot never
   reads one as its own limit. Only `legs.<leg>.symbols` for a leg it declares is the bot's.
-- A change to a port's logic needs its parity tests green; a change that makes a fixture differ is
-  a change from the built-in: say so in the port's `adapter.rs` docs.
+
+## Money safety
+
+Money-safety code needs a failing test first: write the test that reproduces the case, see it fail, then
+fix. That is all of `support/src/` (the bot re-exports `ioc`, `client_id`, `inventory` and `funding`; rsi-momentum
+closes off `close_price`) and the files each built-in's own `AGENTS.md` lists.
 
 ## Writing for the user
 

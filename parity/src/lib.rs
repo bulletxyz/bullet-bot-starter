@@ -1,24 +1,14 @@
-//! Parity with bullet-bots' built-in strategies. A fixture (`fixtures/<strategy>/<test>.jsonl`) is
-//! every call one of the built-in's own tests made to it under the bot's real `StrategyHost`: the
-//! settings, then each `start`, event and `stop` with the view it was shown and the intents it
-//! returned. [`replay`] makes the same calls on a port and compares what it returns.
+//! A regression pin on bullet-bots' built-in strategies. A fixture
+//! (`fixtures/<strategy>/<test>.jsonl`) is every call one of the built-in's own tests made to it
+//! under the bot's real `StrategyHost`: the settings, then each `start`, event and `stop` with the
+//! view it was shown and the intents it returned. [`replay`] makes the same calls on the built-in's
+//! crate and compares what it returns.
 //!
 //! Each line is one JSON object (`kind`: `header`, `warm_up`, `start`, `event`, `stop`); events and
-//! intents are bb-strategy's own JSON (serde, externally tagged), which is the SDK's for every case
-//! the `bb:strategy` world has. What the bot does differently for a plugin is done here as its WASM
-//! host does it:
+//! intents are bb-strategy's own JSON (serde, externally tagged). Client ids are the replay's own:
+//! the first id the recording used in an intent maps to the one the replay used in the same place,
+//! and every later event and view carries the replay's.
 //!
-//! - an event the world has no case for (`Reference`, `Control`, `Persisted`, `Closed`) is not
-//!   delivered; `Failed` arrives as a refused `Outcome` ("risk gate: new orders are stopped: ...");
-//! - a plugin has no `CancelOwn` (its `CancelAll` takes only its own orders) and no `Notify`, so the
-//!   built-in's `CancelOwn` is compared as `CancelAll` and its `Notify` is left out ([`Report`]
-//!   counts both); a bot refuses a plugin's `Shutdown`, so a port stops itself and pulls its
-//!   orders: the built-in's `Shutdown` is compared as `CancelAll`, and the replay ends there;
-//! - client ids are the port's own: the first id the built-in used in an intent maps to the one the
-//!   port used in the same place, and every later event and view carries the port's.
-//!
-//! A fixture is skipped when its built-in was given what a plugin never gets: past candles (a
-//! `warm_up` that loaded, or `history`), hard limits (`limits`) or a daily loss probe (`day_stop`).
 //! When the port refuses the built-in's settings, the built-in must have refused to start too.
 
 use std::collections::BTreeMap;
@@ -30,10 +20,7 @@ use bb_strategy_sdk::{
     StrategyReport,
 };
 use serde::Deserialize;
-use serde_json::{Value, json};
-
-/// What the WASM host says for a place the bot did not send (`bb_strategy::STOPPED_REFUSAL`).
-pub const STOPPED_REFUSAL: &str = "new orders are stopped";
+use serde_json::Value;
 
 /// A view as the fixture holds it (bb-strategy's `View`, owned).
 #[derive(Debug, Clone, Deserialize)]
@@ -88,20 +75,10 @@ pub struct Report {
     pub calls: usize,
     /// Intents compared equal.
     pub intents: usize,
-    /// Events the world does not deliver, skipped.
-    pub undelivered: usize,
-    /// The built-in's `Notify` intents left out, and its `CancelOwn` compared as `CancelAll`.
-    pub notify_dropped: usize,
-    pub cancel_own: usize,
-    /// The built-in asked the bot to stop (`Shutdown`), compared as the port's `CancelAll` (a
-    /// plugin stops itself): the replay ends there, as the bot would.
-    pub shutdown: bool,
     /// Headlines compared equal.
     pub headlines: usize,
     /// The port refused the settings when loaded, and the built-in refused to start on them.
     pub refused: bool,
-    /// Why the fixture was not replayed, when it was not.
-    pub skipped: Option<String>,
     /// Each difference, in plain words.
     pub mismatches: Vec<String>,
 }
@@ -169,85 +146,12 @@ impl Ids {
     }
 }
 
-/// The built-in's intents as a plugin would send them: `Notify` left out, `CancelOwn` as
-/// `CancelAll`; counted in `report`.
-fn as_plugin(intents: &[Value], report: &mut Report) -> Vec<Value> {
-    let mut out = Vec::new();
-    for intent in intents {
-        if intent.get("Notify").is_some() {
-            report.notify_dropped = report.notify_dropped.saturating_add(1);
-        } else if intent == "CancelOwn" {
-            report.cancel_own = report.cancel_own.saturating_add(1);
-            out.push(json!("CancelAll"));
-        } else if intent.get("Shutdown").is_some() {
-            // A bot refuses a plugin's shutdown; a port stops itself and pulls its orders.
-            report.shutdown = true;
-            out.push(json!("CancelAll"));
-        } else {
-            out.push(intent.clone());
-        }
-    }
-    out
-}
-
-/// The event as the WASM host delivers it to a plugin, or `None` when it does not.
-fn as_delivered(event: &Value) -> Option<Value> {
-    if let Some(failed) = event.get("Failed") {
-        let intent = failed.get("intent")?.clone();
-        let error = failed.get("error").and_then(Value::as_str).unwrap_or_default();
-        let place =
-            intent.get("Place").or_else(|| intent.get("Amend").and_then(|a| a.get("new_order")));
-        let client_id = place
-            .or_else(|| intent.get("Cancel"))
-            .and_then(|o| o.get("client_id"))
-            .cloned()
-            .unwrap_or(Value::Null);
-        let error = if place.is_some() {
-            format!("risk gate: {STOPPED_REFUSAL}: {error}")
-        } else {
-            error.to_owned()
-        };
-        let result =
-            json!({"order_id": null, "client_id": client_id, "success": false, "error": error});
-        return answered_as_plugin(json!({"Outcome": {"intent": intent, "result": result}}));
-    }
-    for host_only in ["Reference", "Control", "Persisted", "Closed"] {
-        if event.get(host_only).is_some() {
-            return None;
-        }
-    }
-    answered_as_plugin(event.clone())
-}
-
-/// An outcome (or unknown) of an intent as a plugin hears it: of `CancelAll` for the built-in's
-/// `CancelOwn`; none for an intent only the host asks for (a plugin never sent one).
-fn answered_as_plugin(mut event: Value) -> Option<Value> {
-    for at in ["/Outcome/intent", "/Unknown/intent"] {
-        if let Some(intent) = event.pointer_mut(at)
-            && intent == "CancelOwn"
-        {
-            *intent = json!("CancelAll");
-        }
-    }
-    if let Some(intent) =
-        event.pointer("/Outcome/intent").or_else(|| event.pointer("/Unknown/intent"))
-        && (intent.get("Notify").is_some()
-            || ["Persist", "Reply", "ClosePosition", "SetLimits"]
-                .iter()
-                .any(|k| intent.get(k).is_some()))
-    {
-        return None;
-    }
-    Some(event)
-}
-
 fn to_json(intents: &[Intent]) -> Result<Vec<Value>, String> {
     intents.iter().map(|i| serde_json::to_value(i).map_err(|e| e.to_string())).collect()
 }
 
 /// Compare the built-in's `native` with the port's `port` for call `at`; learn their ids.
 fn compare(at: &str, native: &[Value], port: &[Intent], ids: &mut Ids, report: &mut Report) {
-    let native = as_plugin(native, report);
     let Ok(port) = to_json(port) else {
         report.mismatches.push(format!("{at}: the port's intents do not serialize"));
         return;
@@ -255,7 +159,7 @@ fn compare(at: &str, native: &[Value], port: &[Intent], ids: &mut Ids, report: &
     for (n, p) in native.iter().zip(&port) {
         ids.learn(n, p);
     }
-    let mut want = native.clone();
+    let mut want = native.to_vec();
     for v in &mut want {
         ids.to_port(v);
     }
@@ -300,22 +204,6 @@ fn check_headline<S: StrategyAdapter>(strategy: &S, line: &Value, at: &str, repo
     }
 }
 
-/// Why a fixture cannot be replayed on a plugin, if it cannot: its built-in was given what a plugin
-/// never gets.
-fn skip_reason(lines: &[Value]) -> Option<&'static str> {
-    if lines.iter().any(|l| l["kind"] == "warm_up" && l["loaded"] == true) {
-        return Some("the built-in warmed up on past candles; a plugin gets none");
-    }
-    let header = lines.first()?;
-    [
-        ("history", "the built-in was given past candles; a plugin gets none"),
-        ("limits", "the built-in was given hard limits; a plugin gets none"),
-        ("day_stop", "the built-in was given a daily loss probe; a plugin gets none"),
-    ]
-    .into_iter()
-    .find_map(|(key, why)| header.get(key).is_some().then_some(why))
-}
-
 /// Replay the fixture at `path` through the port `build` makes from the fixture's settings (JSON).
 ///
 /// # Errors
@@ -337,10 +225,6 @@ where
         test: header["test"].as_str().unwrap_or_default().to_owned(),
         ..Report::default()
     };
-    if let Some(why) = skip_reason(&lines) {
-        report.skipped = Some(why.into());
-        return Ok(report);
-    }
     let settings = header["settings"].to_string();
     let mut strategy = match build(&settings) {
         Ok(s) => s,
@@ -375,22 +259,10 @@ where
                         return Ok(report);
                     }
                 }
-                if report.shutdown {
-                    return Ok(report);
-                }
                 check_headline(&strategy, line, &at, &mut report);
             }
             Some("event") => {
-                let Some(mut event) = as_delivered(field(line, "event", &at)?) else {
-                    report.undelivered = report.undelivered.saturating_add(1);
-                    if !intents_of(line, &at)?.is_empty() {
-                        report.mismatches.push(format!(
-                            "{at}: the built-in answered an event a plugin never gets: {}",
-                            line["intents"]
-                        ));
-                    }
-                    continue;
-                };
+                let mut event = field(line, "event", &at)?.clone();
                 ids.to_port(&mut event);
                 let event: Event =
                     serde_json::from_value(event).map_err(|e| format!("{at}: event: {e}"))?;
@@ -398,9 +270,6 @@ where
                 report.calls = report.calls.saturating_add(1);
                 let got = strategy.on_event(&event, &market.view());
                 compare(&at, intents_of(line, &at)?, &got, &mut ids, &mut report);
-                if report.shutdown {
-                    return Ok(report);
-                }
                 check_headline(&strategy, line, &at, &mut report);
             }
             Some("stop") => {
@@ -408,9 +277,6 @@ where
                 report.calls = report.calls.saturating_add(1);
                 let got = strategy.stop(&market.view());
                 compare(&at, intents_of(line, &at)?, &got, &mut ids, &mut report);
-                if report.shutdown {
-                    return Ok(report);
-                }
                 check_headline(&strategy, line, &at, &mut report);
             }
             other => return Err(format!("{at}: unknown kind {other:?}")),

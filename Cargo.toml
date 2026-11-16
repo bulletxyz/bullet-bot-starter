@@ -1,5 +1,5 @@
-# The Bullet bot strategy starter: the guest SDK, the example strategies and what builds them into
-# WASM components (wasm32-wasip2) a bb bot runs as plugins. No crate here depends on the bot.
+# The Bullet bot strategy starter: the guest SDK, the shared support crate, the example plugins and the bot's
+# built-in strategies; the plugins build into WASM components (wasm32-wasip2). No crate here depends on the bot.
 [workspace]
 resolver = "3"
 members = ["sdk", "support", "parity", "strategies/*"]
@@ -18,6 +18,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rust_decimal = { version = "1", features = ["serde-with-str"] }
 schemars = { version = "1", features = ["rust_decimal1"] }
+erased-serde = "0.4"
+tracing = "0.1"
+toml = "0.9"
+chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
@@ -32,6 +36,8 @@ module_name_repetitions = "allow"
 duration_suboptimal_units = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+# The SDK types derive `PartialEq`, so `assert!(x.is_empty())` is as clear as `assert_eq!`.
+assert_is_empty = "allow"
 must_use_candidate = "allow"
 # A strategy runs with real money: no silent panics, no overflowing arithmetic.
 unwrap_used = "deny"
