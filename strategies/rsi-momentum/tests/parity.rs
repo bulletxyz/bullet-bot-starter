@@ -3,14 +3,12 @@
 
 use std::path::Path;
 
-use bb_strategy_rsi_momentum::{RsiMomentum, RsiMomentumConfig};
-use bb_strategy_sdk::{StrategyError, ValidateConfig};
+use bb_strategy_rsi_momentum::RsiMomentum;
+use bb_strategy_sdk::{FromSettings, StrategyError};
 
+/// The bot's build: the strategy from its settings, through the port.
 fn build(settings: &str) -> Result<RsiMomentum, StrategyError> {
-    let config: RsiMomentumConfig = serde_json::from_str(settings)
-        .map_err(|e| StrategyError(format!("rsi-momentum settings: {e}")))?;
-    config.validate().map_err(StrategyError)?;
-    Ok(RsiMomentum::new(config))
+    RsiMomentum::from_settings(settings)
 }
 
 #[test]

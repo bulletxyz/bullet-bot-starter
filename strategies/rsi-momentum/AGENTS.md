@@ -37,7 +37,8 @@ under way; the next start takes it over: the host seeds it and the stop and exit
   `rsi_momentum_close_failing` (`Intent::Notify`), which stays raised until the next start (the
   owner's resume) resolves it.
 - **Live** needs an explicit `daily_loss_usd` and a state directory (`config.rs`); the bot gives the host
-  `max_position` and `daily_loss_usd` (paper default `DEFAULT_DAILY_LOSS_USD`) as its limits.
+  `max_position` and `daily_loss_usd` (paper default `DEFAULT_DAILY_LOSS_USD`) as its limits (each names the limit it
+  sets: `Setting::caps`).
 
 ## Behaviour that changed with the port (intentional)
 
@@ -58,8 +59,9 @@ under way; the next start takes it over: the host seeds it and the stop and exit
   it). `src/adapter.rs`, `src/report.rs`;
   tests in `src/adapter_tests.rs` (venue-read entries in `src/adapter_venue_tests.rs`) and `tests/parity.rs`
   (the calls its host-run tests made, replayed). The tests that run the full host live in the bot.
-- `src/limits.rs`: fixed safety constants. `src/config.rs`: `RsiMomentumConfig`, `PARAM_SPECS`, `settings()` (the
-  descriptor is the bot's).
+- `src/limits.rs`: fixed safety constants. `src/config.rs`: `RsiMomentumConfig`, `PARAM_SPECS`, `settings()`.
+  `src/describe.rs`: `Describe` (with its profile: the owner's page, the `btc-rsi-momentum`
+  preset) and `FromSettings`, how the bot names and builds it.
 
 Money-safety rules apply (root AGENTS.md): a change to `decide`, the adapter's closes or the IOC cap
 needs a failing test first.

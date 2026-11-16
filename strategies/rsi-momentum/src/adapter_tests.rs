@@ -90,6 +90,8 @@ fn a_failing_close_alerts_once_per_close() {
         venue_halt: None,
         path_stop: None,
         read_started_ms: None,
+        limits: None,
+        stop: None,
         market: MarketFacts { step_size: Some(d("0.001")), ..MarketFacts::default() },
         legs: &[],
     };
@@ -166,6 +168,8 @@ fn a_non_positive_mark_never_blocks_a_close() {
         venue_halt: None,
         path_stop: None,
         read_started_ms: None,
+        limits: None,
+        stop: None,
         market: MarketFacts { step_size: Some(d("0.001")), ..MarketFacts::default() },
         legs: &[],
     };

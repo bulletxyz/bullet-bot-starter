@@ -1,19 +1,20 @@
 //! `[strategies.rsi-momentum]`: the knobs and their declared settings.
 
 use bb_strategy_sdk::param_spec::{Loosening, ParamSpec, Range, Tier, whole};
-use bb_strategy_sdk::{CandleInterval, Setting, ValidateConfig};
+use bb_strategy_sdk::{CandleInterval, HostLimit, Setting, ValidateConfig};
 use rust_decimal::Decimal;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 
 /// User-facing knobs for RSI momentum on one Bullet market.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RsiMomentumConfig {
     /// The Bullet market traded.
     pub symbol: String,
     /// Candle length.
     #[serde(default = "d_interval", deserialize_with = "by_name")]
+    #[schemars(with = "String")]
     pub interval: CandleInterval,
     /// RSI lookback in candles (Wilder smoothing).
     #[serde(default = "d_period")]
@@ -298,7 +299,8 @@ impl ValidateConfig for RsiMomentumConfig {
         Ok(())
     }
 }
-/// Every `[strategies.rsi-momentum]` setting: the symbol, the position cap and [`PARAM_SPECS`].
+/// Every `[strategies.rsi-momentum]` setting: the symbol, the position cap and [`PARAM_SPECS`]. The position cap
+/// and `daily_loss_usd` set the host's limits ([`Setting::caps`]).
 #[must_use]
 pub fn settings() -> Vec<Setting> {
     let mut settings = vec![
@@ -318,9 +320,14 @@ pub fn settings() -> Vec<Setting> {
             .tier(Tier::Limit)
             .loosening(Loosening::Up),
         )
-        .required(),
+        .required()
+        .caps(HostLimit::MaxPosition),
     ];
-    settings.extend(PARAM_SPECS.iter().copied().map(Setting::of));
+    // The loss stop the host holds is the smaller of the document's and this one.
+    settings.extend(PARAM_SPECS.iter().copied().map(|spec| match spec.name {
+        "daily_loss_usd" => Setting::of(spec).caps(HostLimit::DailyLossUsd),
+        _ => Setting::of(spec),
+    }));
     settings
 }
 

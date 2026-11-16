@@ -3,14 +3,12 @@
 
 use std::path::Path;
 
-use bb_strategy_grid::{GridConfig, GridStrategy};
-use bb_strategy_sdk::{StrategyError, ValidateConfig};
+use bb_strategy_grid::GridStrategy;
+use bb_strategy_sdk::{FromSettings, StrategyError};
 
+/// The bot's build: the strategy from its settings, through the port.
 fn build(settings: &str) -> Result<GridStrategy, StrategyError> {
-    let config: GridConfig =
-        serde_json::from_str(settings).map_err(|e| StrategyError(format!("grid settings: {e}")))?;
-    config.validate().map_err(StrategyError)?;
-    Ok(GridStrategy::new(config))
+    GridStrategy::from_settings(settings)
 }
 
 #[test]

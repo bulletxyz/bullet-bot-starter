@@ -1,6 +1,7 @@
 pub mod adapter;
 pub mod config;
 pub mod derive;
+mod describe;
 pub mod levels;
 pub mod plan;
 pub mod report;

@@ -36,6 +36,7 @@ the checkout, not file by file over the web.
 | `venue_halt`, `path_stop` | Why the venue, or the bot's own order path (its stop), refuses new orders now. While either is `Some`, don't quote. |
 | `market` | `tick_size`, `step_size`, `maker_fee_bps`, `taker_fee_bps`, `fee_tier`, `venue_name` (each optional). |
 | `legs` | Other venue accounts the strategy declared (`Descriptor::legs`); empty for one market. |
+| `limits`, `stop` | The bot's built-ins only (`None` for a plugin): the hard limits the bot holds the orders to (live), and its own stop, typed (what `path_stop` says in words). |
 
 ## `Event`: what happens
 
@@ -70,9 +71,9 @@ The bot's built-in strategies run on the same trait and also get `Reference`, `C
   until_ms }`. Answered once by `Event::Answer` with the same `id`; don't reuse an id in flight.
 - `Leg { leg, intent }`: an intent on a declared leg (`TRADE_LEG`, `"trade"`, is the main one).
 - `Shutdown`: never; the bot faults a plugin that sends it. To stop, cancel and send nothing more.
-- `Reply`, `Persist`, `ClosePosition`, `SetLimits`, `Targets`: for the bot's built-in strategies only. A plugin
-  that returns one faults (the component traps): never return them. A plugin's `CancelOwn` crosses as `CancelAll`
-  and its `Notify` is dropped.
+- `Reply`, `Persist`, `ClosePosition`, `SetLimits`, `StandDown`, `Targets`: for the bot's built-in strategies only.
+  A plugin that returns one faults (the component traps): never return them. A plugin's `CancelOwn` crosses as
+  `CancelAll` and its `Notify` is dropped.
 
 At most 64 intents a call.
 
@@ -105,13 +106,14 @@ At most 64 intents a call.
 `.loosening(Loosening::Up)`, `.required()`), `settings_schema: schemars::schema_for!(Settings)`, and
 `legs` (`LegNeed::new(id, venue)` per extra venue account). `Tier::Limit` with `Loosening::Up` means
 raising it needs the owner's signature. Name settings as you like: the bot never reads one as its
-own limit.
+own limit (only a built-in names the bot limit a setting sets, with `Setting::caps`).
 
 ## Past candles
 
 `history()` returns `Some(HistoryNeed { interval, want, need })` (`CandleInterval::M1` to `D1`, at
 most 999 bars). Before `start`, `warm_up` gets `Warmup::Loaded { candles, .. }` (oldest first) or
-`Warmup::Unavailable(why)`. See `strategies/sma/`.
+`Warmup::Unavailable(why)`. See `strategies/sma/`. A built-in that needs more than one interval lists them in
+`histories()` and gets each in `warm_up_for(need, warmup)` (native only; a plugin has the one `history()`).
 
 ## The report
 

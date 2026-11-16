@@ -29,7 +29,7 @@ pub use config::{param_spec, text_format};
 pub use guards::{alert_keys, stops};
 pub use host::targets;
 
-pub use config::setting::{Setting, ValidateConfig};
+pub use config::setting::{HostLimit, Setting, ValidateConfig};
 pub use erased_serde::Serialize as ErasedSerialize;
 pub use history::candles::{Candle, CandleInterval, HistoryNeed, MAX_HISTORY_CANDLES, Warmup};
 pub use history::records::{
@@ -46,9 +46,12 @@ pub use strategy::adapter::{
     StrategyReport, View,
 };
 pub use strategy::describe::{
-    Describe, Descriptor, LegNeed, Loosening, Range, SettingKind, SettingSpec, Tier,
+    DEFAULT_RESYNC_TICKS, Describe, Descriptor, Feed, LegNeed, Loosening, Needs, Range,
+    SettingKind, SettingSpec, Tier,
 };
 pub use strategy::erased::ErasedAdapter;
+pub use strategy::profile;
+pub use strategy::profile::{About, ExchangeNeed, Featured, Preset, Profile, Risk, RiskLevel};
 pub use strategy::report::{
     MAX_FIELD_NAME, MAX_FIELD_TEXT, MAX_FIELD_UNIT, MAX_HEADLINE, MAX_REPORT_FIELDS, fields_json,
     fields_of,

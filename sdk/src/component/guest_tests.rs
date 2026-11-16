@@ -186,6 +186,8 @@ fn view<'a>(book: &'a OrderBook, orders: &'a [Order], legs: &'a [LegView]) -> Vi
         legs,
         path_stop: Some("daily loss"),
         read_started_ms: Some(1_794_398_399_900),
+        limits: None,
+        stop: None,
         position: d("-0.75"),
         avg_entry: Some(d("75.25")),
         realized_pnl: d("-12.5"),

@@ -1,3 +1,4 @@
+use bb_strategy_sdk::stops::StopReason;
 use bb_strategy_sdk::{Intent, NewOrder, OrderBook, OrderType, Side, View};
 use bb_strategy_support::ioc::{MAX_IOC_BPS_FROM_MID, capped_ioc_price, two_sided_mid};
 use bb_strategy_support::touch;
@@ -10,8 +11,12 @@ impl GridStrategy {
     /// grid's own stop, a normal one: its state is trusted and it ends its own trading, so only its
     /// own orders go ([`Intent::CancelOwn`]; the owner's on the market stay). The daily loss stop
     /// is a safety stop: every order on the market goes ([`Intent::CancelAll`]), as the path's
-    /// halt for it.
-    fn stop_reason(&self, mid: Option<Decimal>) -> Option<(String, Intent)> {
+    /// halt for it: the host's (`View::stop`), or the build's closure.
+    fn stop_reason(
+        &self,
+        mid: Option<Decimal>,
+        host: Option<&StopReason>,
+    ) -> Option<(String, Intent)> {
         let plan = self.plan.as_ref()?;
         if let Some(mid) = mid {
             if let Some(stop) = plan.stop_below
@@ -27,7 +32,8 @@ impl GridStrategy {
                 return Some((why, Intent::CancelOwn));
             }
         }
-        if self.day_stop.as_ref().is_some_and(|tripped| tripped()) {
+        let day_stop = matches!(host, Some(StopReason::DailyLoss { .. }));
+        if day_stop || self.day_stop.as_ref().is_some_and(|tripped| tripped()) {
             return Some(("daily loss stop".into(), Intent::CancelAll));
         }
         None
@@ -75,12 +81,12 @@ impl GridStrategy {
             return Some(self.close(view, attempt).into_iter().collect());
         }
         let mid = view.book.and_then(OrderBook::midpoint);
-        let (reason, pull) = self.stop_reason(mid)?;
+        let (reason, pull) = self.stop_reason(mid, view.stop)?;
         tracing::warn!(%reason, position = %view.position, "Grid stopping: cancel and close");
         self.state.clear_all();
         // Only the hard stop pulls its own orders; the loss watch holds a daily loss trip.
         let hard = matches!(pull, Intent::CancelOwn);
-        let said = hard.then(|| self.hold_for_hard_stop(&reason)).flatten();
+        let said = if hard { self.hold_for_hard_stop(&reason) } else { Vec::new() };
         self.halt = Some(Halt { reason, attempts: 1, pull: pull.clone() });
         let mut out = vec![pull];
         out.extend(self.close(view, 1));
@@ -88,17 +94,24 @@ impl GridStrategy {
         Some(out)
     }
 
-    /// Ask the instance's hold for the hard stop, and what the owner is told of it (none without a
-    /// hold: nothing holds the grid past its run).
-    fn hold_for_hard_stop(&self, reason: &str) -> Option<Intent> {
-        let hold = self.hard_stop_hold.as_ref()?;
+    /// Hold the instance for the hard stop (the build's hold, else the host's stand-down, after the
+    /// close), and what the owner is told of it.
+    fn hold_for_hard_stop(&self, reason: &str) -> Vec<Intent> {
         tracing::warn!(%reason, "Grid hard stop: holding the instance until the owner resumes");
-        hold();
+        let mut out = Vec::new();
+        match &self.hard_stop_hold {
+            Some(hold) => hold(),
+            None => out.push(Intent::StandDown(format!("grid {reason}"))),
+        }
         let text = format!(
             "Grid {reason}: it closed its position and stays held, through a restart too, until you \
              resume it. A resume starts a new grid at the price then."
         );
-        Some(Intent::Notify(bb_strategy_sdk::Alert::Raise { key: KEY_HARD_STOP.to_string(), text }))
+        out.push(Intent::Notify(bb_strategy_sdk::Alert::Raise {
+            key: KEY_HARD_STOP.to_string(),
+            text,
+        }));
+        out
     }
 
     /// While the stop's cancel has not landed orders may still rest, so it is asked again, the same kind.
