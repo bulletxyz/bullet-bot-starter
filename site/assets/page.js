@@ -1,15 +1,15 @@
-// The prompt is fixed here on purpose: never take it from the URL, or anyone could make a link on
-// this domain that opens Claude with their own instructions.
+// A page that opens Claude Code with one prompt: the text of its #prompt box. The prompt is fixed in
+// each page's HTML on purpose: never take it from the URL, or anyone could make a link on this domain
+// that opens Claude with their own instructions.
 (function () {
-  var prompt = "Deploy and set up my Bullet trading bot for me. Follow this guide: " +
-    "https://raw.githubusercontent.com/bulletxyz/bullet-bot-starter/main/DEPLOY-WITH-CLAUDE.md";
+  var box = document.getElementById("prompt");
+  var prompt = box.value.trim();
   var q = encodeURIComponent(prompt);
   var app = "claude://code/new?q=" + q;
 
   document.getElementById("open-app").href = app;
   document.getElementById("open-web").href = "https://claude.ai/code?q=" + q;
 
-  var box = document.getElementById("prompt");
   box.value = prompt;
   var fit = function () { box.style.height = "auto"; box.style.height = box.scrollHeight + 2 + "px"; };
   fit();
