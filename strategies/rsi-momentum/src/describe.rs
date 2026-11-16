@@ -7,6 +7,7 @@ use bb_strategy_sdk::{
     About, Describe, Descriptor, ExchangeNeed, Featured, FromSettings, Preset, Profile, Risk,
     RiskLevel, SettingSpec, StrategyError, ValidateConfig,
 };
+use bb_strategy_sdk::{Feed, Needs};
 use rust_decimal::Decimal;
 
 use crate::{RsiMomentum, RsiMomentumConfig};
@@ -56,6 +57,13 @@ impl Describe for RsiMomentum {
             }],
             presets: vec![BTC_RSI],
         })
+    }
+
+    /// Its candles are built from the venue's mark. The venue's position is the truth: a gap the
+    /// fills no longer explain is taken over after two ticks, and a wind-down closes until the
+    /// venue reads flat.
+    fn needs() -> Needs {
+        Needs { feeds: vec![Feed::Mark], resync: Some(2), flatten_on_wind_down: true }
     }
 }
 

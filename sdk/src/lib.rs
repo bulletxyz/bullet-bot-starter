@@ -46,7 +46,8 @@ pub use strategy::adapter::{
     StrategyReport, View,
 };
 pub use strategy::describe::{
-    Describe, Descriptor, LegNeed, Loosening, Range, SettingKind, SettingSpec, Tier,
+    DEFAULT_RESYNC_TICKS, Describe, Descriptor, Feed, LegNeed, Loosening, Needs, Range,
+    SettingKind, SettingSpec, Tier,
 };
 pub use strategy::erased::ErasedAdapter;
 pub use strategy::profile;

@@ -25,6 +25,44 @@ pub trait Describe {
     fn profile() -> Option<crate::Profile> {
         None
     }
+
+    /// What the host wires for it (native only; a plugin gets the default): see [`Needs`]. The
+    /// candles it warms up on depend on its settings, so they are the built strategy's
+    /// ([`StrategyAdapter::history`](crate::StrategyAdapter::history)), not this.
+    fn needs() -> Needs {
+        Needs::default()
+    }
+}
+
+/// Ticks in a row the venue's position must disagree with the fills before the host takes the
+/// venue's over, unless a strategy says otherwise.
+pub const DEFAULT_RESYNC_TICKS: u32 = 2;
+
+/// A feed the host delivers beyond the strategy's own book, fills and orders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Feed {
+    /// The venue's mark price ([`Event::Mark`](crate::Event::Mark)).
+    Mark,
+    /// The reference price from another venue ([`Event::Reference`](crate::Event::Reference)).
+    Reference,
+}
+
+/// What the host wires for a strategy ([`Describe::needs`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Needs {
+    pub feeds: Vec<Feed>,
+    /// Ticks in a row the venue's position must disagree with the fills before the host takes the
+    /// venue's over (new orders stop while a gap is pending); `None`: off.
+    pub resync: Option<u32>,
+    /// The wind-down closes the position until the venue reads flat.
+    pub flatten_on_wind_down: bool,
+}
+
+impl Default for Needs {
+    /// No extra feed, the host's resync on, no flatten at wind-down.
+    fn default() -> Self {
+        Self { feeds: Vec::new(), resync: Some(DEFAULT_RESYNC_TICKS), flatten_on_wind_down: false }
+    }
 }
 
 /// A component's name, version and settings.

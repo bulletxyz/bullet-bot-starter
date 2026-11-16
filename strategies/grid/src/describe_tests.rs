@@ -45,3 +45,9 @@ fn the_grid_preset_is_a_neutral_normal_grid_of_the_amount() {
     let worst = (sol.worst_case)(rust_decimal::Decimal::from(250));
     assert!(worst.contains("$250") && worst.contains("stop"), "{worst}");
 }
+
+#[test]
+fn the_grid_needs_no_feed_and_no_flatten_at_wind_down() {
+    let needs = GridStrategy::needs();
+    assert!(needs.feeds.is_empty() && !needs.flatten_on_wind_down);
+}

@@ -55,3 +55,14 @@ fn the_momentum_preset_caps_the_position_at_the_amount_and_stops_at_five_percent
     assert!((btc.settings)(Decimal::from(100), Some(dear)).unwrap_err().contains("too small"));
     assert!((btc.worst_case)(Decimal::from(100)).contains("$5 loss"));
 }
+
+/// What the bot wired by name: the mark feed, a two-tick resync and a flatten at wind-down.
+#[test]
+fn rsi_momentum_reads_the_mark_resyncs_in_two_ticks_and_flattens_on_the_way_out() {
+    use bb_strategy_sdk::{Feed, Needs};
+    let needs = RsiMomentum::needs();
+    assert_eq!(
+        needs,
+        Needs { feeds: vec![Feed::Mark], resync: Some(2), flatten_on_wind_down: true }
+    );
+}
