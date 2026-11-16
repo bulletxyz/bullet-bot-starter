@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Deploy with Claude Code</title>
+<style>
+  :root { --bg: #faf9f5; --fg: #1f1e1d; --muted: #6b6a66; --box: #f0eee6; --accent: #d97757; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1f1e1d; --fg: #f0eee6; --muted: #a3a29c; --box: #2b2a27; }
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 16px/1.5 system-ui, -apple-system, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 48px 16px; }
+  h1 { font-size: 1.5rem; margin: 0 0 8px; }
+  p { color: var(--muted); }
+  p a:not(.button) { color: var(--accent); }
+  pre { background: var(--box); padding: 12px; border-radius: 8px; white-space: pre-wrap;
+        word-break: break-word; font-size: 0.9rem; }
+  a.button, button { display: inline-block; background: var(--accent); color: #fff; border: 0;
+        border-radius: 8px; padding: 10px 16px; font: inherit; text-decoration: none; cursor: pointer; }
+  button { background: var(--box); color: var(--fg); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Opening Claude Code…</h1>
+  <p>Your browser may ask to open the Claude app. Allow it, then send the message in the <b>Code</b> tab.</p>
+  <p><a class="button" id="open" href="#">Open in Claude Code</a></p>
+  <p>Nothing happened? Install the <a href="https://claude.ai/download">Claude desktop app</a>, open its
+     <b>Code</b> tab and paste this:</p>
+  <pre id="prompt"></pre>
+  <p><button id="copy" type="button">Copy</button></p>
+</main>
+<script>
+  // The prompt is fixed here on purpose: never take it from the URL, or anyone could make a link
+  // on this domain that opens Claude Code with their own instructions.
+  const prompt = "Deploy and set up my Bullet trading bot for me. Follow this guide: " +
+    "https://raw.githubusercontent.com/bulletxyz/bullet-bot-starter/main/DEPLOY-WITH-CLAUDE.md";
+  const deepLink = "claude://code/new?q=" + encodeURIComponent(prompt);
+
+  document.getElementById("prompt").textContent = prompt;
+  document.getElementById("open").href = deepLink;
+  document.getElementById("copy").addEventListener("click", async (e) => {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      e.target.textContent = "Copied";
+    } catch {
+      e.target.textContent = "Select the text above to copy it";
+    }
+  });
+  location.href = deepLink;
+</script>
+</body>
+</html>

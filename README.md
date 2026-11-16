@@ -8,7 +8,7 @@ write your own strategies for it.
 [![Deploy with Claude Code][badge]][deploy]
 
 [badge]: https://img.shields.io/badge/Deploy%20with-Claude%20Code-D97757?logo=claude&logoColor=white
-[deploy]: claude://code/new?q=Deploy%20and%20set%20up%20my%20Bullet%20trading%20bot%20for%20me.%20Follow%20this%20guide%3A%20https%3A%2F%2Fraw.githubusercontent.com%2Fbulletxyz%2Fbullet-bot-starter%2Fmain%2FDEPLOY-WITH-CLAUDE.md
+[deploy]: https://bulletxyz.github.io/bullet-bot-starter/deploy/
 
 Use Claude Code, not a regular Claude chat: the button opens it (in the Claude app, the **Code** tab). No message
 filled in? Paste this into Claude Code:
