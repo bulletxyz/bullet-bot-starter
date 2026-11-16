@@ -59,7 +59,8 @@ under way; the next start takes it over: the host seeds it and the stop and exit
   tests in `src/adapter_tests.rs` (venue-read entries in `src/adapter_venue_tests.rs`) and `tests/parity.rs`
   (the calls its host-run tests made, replayed). The tests that run the full host live in the bot.
 - `src/limits.rs`: fixed safety constants. `src/config.rs`: `RsiMomentumConfig`, `PARAM_SPECS`, `settings()`.
-  `src/describe.rs`: `Describe` and `FromSettings`, how the bot names and builds it.
+  `src/describe.rs`: `Describe` (with its profile: the owner's page, the `btc-rsi-momentum`
+  preset) and `FromSettings`, how the bot names and builds it.
 
 Money-safety rules apply (root AGENTS.md): a change to `decide`, the adapter's closes or the IOC cap
 needs a failing test first.

@@ -102,6 +102,8 @@ mid; the owner's resume starts one, whose start resolves the alert
   `adapter/events.rs`: fills, order updates, books and ticks; `adapter/orders/`: placement, the reconcile of what a
   read shows, the strays; `adapter/stops/`: the hard and daily loss stops and their cancel (`pull.rs`);
   `adapter/pauses.rs`: out of range and the trend filter; `adapter/warm.rs`, `adapter/reclaim.rs`.
+- `describe.rs`: `Describe` (with its profile: the owner's page, the `sol-grid` preset) and `FromSettings`, how the
+  bot names and builds it.
 - The grid keeps issuing client ids for its levels (`ClientIdIssuer`): `Event::Outcome` and `Event::Fill` find a
   level by client id.
 - Tests: `adapter_tests.rs` (call `on_event` on a hand-built `View`; by behaviour in `adapter_direction_tests.rs`,

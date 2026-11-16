@@ -18,6 +18,13 @@ pub trait Describe {
     const VERSION: &'static str;
 
     fn describe() -> Descriptor;
+
+    /// A built-in's profile (native only, never in the WIT world): its owner page, its paper and
+    /// loss stop, its exchanges and presets. `None` (the default, every plugin): the bot's page
+    /// falls back to the summary.
+    fn profile() -> Option<crate::Profile> {
+        None
+    }
 }
 
 /// A component's name, version and settings.

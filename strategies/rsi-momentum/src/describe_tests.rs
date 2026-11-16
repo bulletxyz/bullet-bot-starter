@@ -24,3 +24,34 @@ fn rsi_momentum_builds_from_its_settings_and_refuses_what_it_cannot_run() {
     let crossed = r#"{"symbol": "BTC-USD", "max_position": "1", "short_below": "70"}"#;
     assert!(RsiMomentum::from_settings(crossed).is_err());
 }
+
+#[test]
+fn the_rsi_momentum_profile_is_the_bots_descriptor() {
+    let p = RsiMomentum::profile().unwrap();
+    assert_eq!(p.about.title, "RSI momentum");
+    assert!(p.supports_paper && p.has_loss_stop);
+    assert_eq!(p.settings, crate::settings());
+    assert_eq!((p.exchanges[0].role, p.exchanges[0].setting), ("venue", None));
+    let featured: Vec<_> = p.about.featured.iter().map(|f| f.path).collect();
+    assert_eq!(featured, ["rsi_period", "long_above", "exit_band"]);
+}
+
+#[test]
+fn the_momentum_preset_caps_the_position_at_the_amount_and_stops_at_five_percent() {
+    use bb_strategy_sdk::profile::PresetMarket;
+    use rust_decimal::Decimal;
+    let p = RsiMomentum::profile().unwrap().presets;
+    let [btc] = p.as_slice() else { panic!("one preset: {p:?}") };
+    assert_eq!((btc.id, btc.symbol, btc.needs_market), ("btc-rsi-momentum", Some("BTC-USD"), true));
+    let market = PresetMarket { price: Decimal::from(80_000), step: Decimal::new(1, 4) };
+    let s = (btc.settings)(Decimal::from(100), Some(market)).unwrap();
+    assert_eq!(s["notional_usd"], "100");
+    // $100 at $80k is 0.00125 BTC, floored to the 0.0001 step.
+    assert_eq!(s["max_position"], "0.0012");
+    assert_eq!(s["daily_loss_usd"], "5");
+    assert_eq!(s["stale_secs"], "30");
+    assert!((btc.settings)(Decimal::from(100), None).unwrap_err().contains("price"));
+    let dear = PresetMarket { price: Decimal::from(400_000), step: Decimal::new(1, 3) };
+    assert!((btc.settings)(Decimal::from(100), Some(dear)).unwrap_err().contains("too small"));
+    assert!((btc.worst_case)(Decimal::from(100)).contains("$5 loss"));
+}

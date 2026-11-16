@@ -49,6 +49,8 @@ pub use strategy::describe::{
     Describe, Descriptor, LegNeed, Loosening, Range, SettingKind, SettingSpec, Tier,
 };
 pub use strategy::erased::ErasedAdapter;
+pub use strategy::profile;
+pub use strategy::profile::{About, ExchangeNeed, Featured, Preset, Profile, Risk, RiskLevel};
 pub use strategy::report::{
     MAX_FIELD_NAME, MAX_FIELD_TEXT, MAX_FIELD_UNIT, MAX_HEADLINE, MAX_REPORT_FIELDS, fields_json,
     fields_of,
