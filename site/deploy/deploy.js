@@ -7,7 +7,7 @@
   var app = "claude://code/new?q=" + q;
 
   document.getElementById("open-app").href = app;
-  document.getElementById("open-web").href = "https://claude.ai/new?q=" + q;
+  document.getElementById("open-web").href = "https://claude.ai/code?q=" + q;
 
   var box = document.getElementById("prompt");
   box.value = prompt;
