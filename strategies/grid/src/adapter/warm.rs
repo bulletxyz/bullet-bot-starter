@@ -6,6 +6,7 @@ use bb_strategy_sdk::CandleInterval;
 use bb_strategy_sdk::{HistoryNeed, MAX_HISTORY_CANDLES, Warmup};
 
 use super::GridStrategy;
+use crate::plan::History;
 
 impl GridStrategy {
     /// Three slow windows of 1m candles when the trend filter is on, all of them needed: a filter
@@ -16,6 +17,36 @@ impl GridStrategy {
             cfg.slow_secs.saturating_mul(3).div_ceil(60).clamp(1, u64::from(MAX_HISTORY_CANDLES));
         let bars = u32::try_from(bars).unwrap_or(1);
         Some(HistoryNeed { interval: CandleInterval::M1, want: bars, need: bars })
+    }
+
+    /// The trend filter's need, and for a derived range with no history from the build the daily
+    /// candles over its lookback and the hourly ones for the ATR, all of them needed.
+    pub(crate) fn history_needs(&self) -> Vec<HistoryNeed> {
+        let mut needs: Vec<_> = self.history_need().into_iter().collect();
+        if self.history.is_none() && self.config.needs_history() {
+            let (days, hours) = self.config.history_bars();
+            let all = |interval, n| HistoryNeed { interval, want: n, need: n };
+            needs.extend([all(CandleInterval::D1, days), all(CandleInterval::H1, hours)]);
+        }
+        needs
+    }
+
+    /// The candles of one need: the range's daily and hourly ones, else the trend filter's.
+    pub(crate) fn warm_for(&mut self, need: HistoryNeed, warmup: Warmup) {
+        if !matches!(need.interval, CandleInterval::D1 | CandleInterval::H1) {
+            return self.warm(warmup);
+        }
+        match warmup {
+            Warmup::Loaded { candles, .. } => {
+                let history = self.history.get_or_insert_with(History::default);
+                if need.interval == CandleInterval::D1 {
+                    history.daily = candles;
+                } else {
+                    history.hourly = candles;
+                }
+            }
+            Warmup::Unavailable(why) => self.history_gap = Some(why),
+        }
     }
 
     /// The warm-up's note stays up while the filter is young (three slow windows of live data

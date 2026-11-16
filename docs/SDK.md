@@ -111,7 +111,8 @@ own limit.
 
 `history()` returns `Some(HistoryNeed { interval, want, need })` (`CandleInterval::M1` to `D1`, at
 most 999 bars). Before `start`, `warm_up` gets `Warmup::Loaded { candles, .. }` (oldest first) or
-`Warmup::Unavailable(why)`. See `strategies/sma/`.
+`Warmup::Unavailable(why)`. See `strategies/sma/`. A built-in that needs more than one interval lists them in
+`histories()` and gets each in `warm_up_for(need, warmup)` (native only; a plugin has the one `history()`).
 
 ## The report
 

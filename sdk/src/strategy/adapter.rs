@@ -162,6 +162,20 @@ pub trait StrategyAdapter: Send + 'static {
     /// says so in its report.
     fn warm_up(&mut self, _warmup: Warmup) {}
 
+    /// Every series of past candles this strategy warms up on, for one that needs more than one
+    /// interval (native only: the WIT world's `history` keeps one). The host loads each before
+    /// [`Self::start`] and hands it to [`Self::warm_up_for`]. The default is [`Self::history`]'s
+    /// one need.
+    fn histories(&self) -> Vec<HistoryNeed> {
+        self.history().into_iter().collect()
+    }
+
+    /// Once for each of [`Self::histories`], before [`Self::start`]: the bars loaded for `need`, or
+    /// why there are none. The default hands them to [`Self::warm_up`].
+    fn warm_up_for(&mut self, _need: HistoryNeed, warmup: Warmup) {
+        self.warm_up(warmup);
+    }
+
     /// The stop (and take-profit) this strategy wants the venue to hold for the position it has
     /// now, so the position stays guarded while the bot is down. `None` (the default): none. The
     /// host keeps the venue's stop at it, live, on a venue that holds stops; the strategy's own

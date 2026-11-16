@@ -40,6 +40,12 @@ impl StrategyAdapter for GridStrategy {
         let mid = book.midpoint().ok_or_else(|| {
             StrategyError("No orderbook data available to compute mid at startup".into())
         })?;
+        if let Some(why) = &self.history_gap {
+            return Err(StrategyError(format!(
+                "The grid can't set its range for {}: {why}",
+                self.symbol()
+            )));
+        }
         self.tick = view.market.tick_size;
         let market = Market { mid, tick: view.market.tick_size, lot: view.market.step_size };
         let plan = plan::resolve(&self.config, market, self.history.as_ref(), self.limits)
@@ -201,6 +207,14 @@ impl StrategyAdapter for GridStrategy {
 
     fn history(&self) -> Option<HistoryNeed> {
         self.history_need()
+    }
+
+    fn histories(&self) -> Vec<HistoryNeed> {
+        self.history_needs()
+    }
+
+    fn warm_up_for(&mut self, need: HistoryNeed, warmup: Warmup) {
+        self.warm_for(need, warmup);
     }
 
     fn reclaim(&mut self) {

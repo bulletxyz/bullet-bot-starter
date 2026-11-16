@@ -28,7 +28,7 @@ pub trait Describe {
 
     /// What the host wires for it (native only; a plugin gets the default): see [`Needs`]. The
     /// candles it warms up on depend on its settings, so they are the built strategy's
-    /// ([`StrategyAdapter::history`](crate::StrategyAdapter::history)), not this.
+    /// ([`StrategyAdapter::histories`](crate::StrategyAdapter::histories)), not this.
     fn needs() -> Needs {
         Needs::default()
     }

@@ -2,8 +2,9 @@
 
 Futures grid on Bullet (V1). `GridStrategy` (`src/adapter.rs`) is a `bb_strategy_sdk::StrategyAdapter`: it holds
 only the level state and returns `Intent`s; the bot's strategy host places them and owns the inventory, the clock,
-the book, the venue reads, paper and the snapshot. The bot reads the price history (candles through the `candles`
-read) when the range or the levels are derived, and passes the hard limits (`limits.max_position`,
+the book, the venue reads, paper and the snapshot. The bot reads the price history when the range or the levels are
+derived: its build passes it (`with_history`), or its host loads the daily and hourly candles the grid lists in
+`histories()` (a load that fails refuses the start with the host's reason), and passes the hard limits (`limits.max_position`,
 `limits.max_notional_usd`, live only) and the daily loss stop. The mode is the bot's (paper until the owner's
 signed go-live), as for every strategy.
 
