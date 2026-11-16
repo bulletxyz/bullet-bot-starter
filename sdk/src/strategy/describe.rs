@@ -18,6 +18,51 @@ pub trait Describe {
     const VERSION: &'static str;
 
     fn describe() -> Descriptor;
+
+    /// A built-in's profile (native only, never in the WIT world): its owner page, its paper and
+    /// loss stop, its exchanges and presets. `None` (the default, every plugin): the bot's page
+    /// falls back to the summary.
+    fn profile() -> Option<crate::Profile> {
+        None
+    }
+
+    /// What the host wires for it (native only; a plugin gets the default): see [`Needs`]. The
+    /// candles it warms up on depend on its settings, so they are the built strategy's
+    /// ([`StrategyAdapter::histories`](crate::StrategyAdapter::histories)), not this.
+    fn needs() -> Needs {
+        Needs::default()
+    }
+}
+
+/// Ticks in a row the venue's position must disagree with the fills before the host takes the
+/// venue's over, unless a strategy says otherwise.
+pub const DEFAULT_RESYNC_TICKS: u32 = 2;
+
+/// A feed the host delivers beyond the strategy's own book, fills and orders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Feed {
+    /// The venue's mark price ([`Event::Mark`](crate::Event::Mark)).
+    Mark,
+    /// The reference price from another venue ([`Event::Reference`](crate::Event::Reference)).
+    Reference,
+}
+
+/// What the host wires for a strategy ([`Describe::needs`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Needs {
+    pub feeds: Vec<Feed>,
+    /// Ticks in a row the venue's position must disagree with the fills before the host takes the
+    /// venue's over (new orders stop while a gap is pending); `None`: off.
+    pub resync: Option<u32>,
+    /// The wind-down closes the position until the venue reads flat.
+    pub flatten_on_wind_down: bool,
+}
+
+impl Default for Needs {
+    /// No extra feed, the host's resync on, no flatten at wind-down.
+    fn default() -> Self {
+        Self { feeds: Vec::new(), resync: Some(DEFAULT_RESYNC_TICKS), flatten_on_wind_down: false }
+    }
 }
 
 /// A component's name, version and settings.
@@ -138,6 +183,33 @@ impl SettingSpec {
     pub fn required(mut self) -> Self {
         self.required = true;
         self
+    }
+}
+
+/// A built-in's [`Setting`](crate::Setting) as the wire form a [`Descriptor`] lists.
+impl From<&crate::Setting> for SettingSpec {
+    fn from(s: &crate::Setting) -> Self {
+        use crate::param_spec::ParamKind;
+        let words = |w: &[&str]| w.iter().map(|s| (*s).to_string()).collect();
+        let p = &s.spec;
+        Self {
+            path: s.path.clone(),
+            kind: match p.kind {
+                ParamKind::Decimal => SettingKind::Decimal,
+                ParamKind::Int => SettingKind::Int,
+                ParamKind::Bool => SettingKind::Flag,
+                ParamKind::Enum { choices } => SettingKind::Choice(words(choices)),
+                ParamKind::Text { default } => SettingKind::Text(default.into()),
+                ParamKind::List { default } => SettingKind::Words(words(default)),
+            },
+            default: p.default,
+            guarded: p.guarded,
+            hard: p.hard,
+            help: p.help.into(),
+            tier: p.tier,
+            loosening: p.loosening,
+            required: s.required,
+        }
     }
 }
 

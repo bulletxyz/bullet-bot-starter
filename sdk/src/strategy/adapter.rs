@@ -162,6 +162,20 @@ pub trait StrategyAdapter: Send + 'static {
     /// says so in its report.
     fn warm_up(&mut self, _warmup: Warmup) {}
 
+    /// Every series of past candles this strategy warms up on, for one that needs more than one
+    /// interval (native only: the WIT world's `history` keeps one). The host loads each before
+    /// [`Self::start`] and hands it to [`Self::warm_up_for`]. The default is [`Self::history`]'s
+    /// one need.
+    fn histories(&self) -> Vec<HistoryNeed> {
+        self.history().into_iter().collect()
+    }
+
+    /// Once for each of [`Self::histories`], before [`Self::start`]: the bars loaded for `need`, or
+    /// why there are none. The default hands them to [`Self::warm_up`].
+    fn warm_up_for(&mut self, _need: HistoryNeed, warmup: Warmup) {
+        self.warm_up(warmup);
+    }
+
     /// The stop (and take-profit) this strategy wants the venue to hold for the position it has
     /// now, so the position stays guarded while the bot is down. `None` (the default): none. The
     /// host keeps the venue's stop at it, live, on a venue that holds stops; the strategy's own
@@ -260,6 +274,12 @@ pub struct View<'a> {
     /// `None` with no fresh read. A strategy that decides on what a read omits compares it with
     /// when the thing it asks about was sent, not with when the read reached it.
     pub read_started_ms: Option<u64>,
+    /// The hard limits the host holds the order path to (native only; `None` for a plugin), live:
+    /// a paper run leaves it `None`, so a paper cap nobody chose refuses no plan.
+    pub limits: Option<LimitsInForce>,
+    /// The host's own stop, typed (native only; `None` for a plugin): what `path_stop` says in
+    /// words, so a strategy can tell a daily loss stop from a pause.
+    pub stop: Option<&'a StopReason>,
 }
 
 /// The venue's facts about the market, when it reports them.
@@ -281,12 +301,16 @@ pub struct LimitsInForce {
     pub max_position: Decimal,
     pub daily_loss_usd: Decimal,
     pub stale_secs: Option<u64>,
+    /// The most notional (USD) the path holds open, when there is a cap (left out of the JSON
+    /// when there is none).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_notional_usd: Option<Decimal>,
 }
 
 impl LimitsInForce {
     #[must_use]
     pub fn new(max_position: Decimal, daily_loss_usd: Decimal, stale_secs: Option<u64>) -> Self {
-        Self { max_position, daily_loss_usd, stale_secs }
+        Self { max_position, daily_loss_usd, stale_secs, max_notional_usd: None }
     }
 }
 
@@ -390,7 +414,7 @@ impl Event {
 }
 
 /// What a strategy asks the host to do (exhaustive, see [`Event`]). Every order passes the host's gate. A plugin
-/// faults on `Reply`, `Persist`, `ClosePosition`, `SetLimits` or `Targets`; its `CancelOwn` crosses as
+/// faults on `Reply`, `Persist`, `ClosePosition`, `SetLimits`, `StandDown` or `Targets`; its `CancelOwn` crosses as
 /// `CancelAll` (its own orders only) and its `Notify` is dropped.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Intent {
@@ -406,6 +430,10 @@ pub enum Intent {
     Amend(AmendOrder),
     /// Stop the bot, with the reason (e.g. a config that can't run).
     Shutdown(String),
+    /// Hold the instance for safety, with the reason: the supervisor's safety hold, kept through
+    /// a restart until the owner resumes it. The strategy closes what it holds itself first, in
+    /// the same round or before.
+    StandDown(String),
     /// Answer the command [`Event::Control`] delivered under `id`. The host sends the reply to the
     /// caller; an id it does not know (already answered) is ignored.
     Reply {
@@ -472,3 +500,7 @@ impl fmt::Display for StrategyError {
 }
 
 impl std::error::Error for StrategyError {}
+
+#[cfg(test)]
+#[path = "adapter_tests.rs"]
+mod tests;

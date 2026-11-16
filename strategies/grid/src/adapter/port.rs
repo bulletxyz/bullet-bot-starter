@@ -5,7 +5,7 @@ use rust_decimal::Decimal;
 
 use crate::adapter::{GridStrategy, KEY_HARD_STOP, Seen};
 use crate::derive::Direction;
-use crate::plan::{self, Market, Plan};
+use crate::plan::{self, HardLimits, Market, Plan};
 use crate::report::{GridPnl, GridReport};
 
 impl StrategyAdapter for GridStrategy {
@@ -40,9 +40,20 @@ impl StrategyAdapter for GridStrategy {
         let mid = book.midpoint().ok_or_else(|| {
             StrategyError("No orderbook data available to compute mid at startup".into())
         })?;
+        if let Some(why) = &self.history_gap {
+            return Err(StrategyError(format!(
+                "The grid can't set its range for {}: {why}",
+                self.symbol()
+            )));
+        }
         self.tick = view.market.tick_size;
         let market = Market { mid, tick: view.market.tick_size, lot: view.market.step_size };
-        let plan = plan::resolve(&self.config, market, self.history.as_ref(), self.limits)
+        // The host's limits in force, when it shows them, else the build's.
+        let limits = view.limits.as_ref().map_or(self.limits, |l| HardLimits {
+            max_position: Some(l.max_position),
+            max_notional_usd: l.max_notional_usd,
+        });
+        let plan = plan::resolve(&self.config, market, self.history.as_ref(), limits)
             .map_err(StrategyError)?;
         self.check_fee_floor(&plan)?;
         self.state.compute_levels(&plan, self.tick);
@@ -201,6 +212,14 @@ impl StrategyAdapter for GridStrategy {
 
     fn history(&self) -> Option<HistoryNeed> {
         self.history_need()
+    }
+
+    fn histories(&self) -> Vec<HistoryNeed> {
+        self.history_needs()
+    }
+
+    fn warm_up_for(&mut self, need: HistoryNeed, warmup: Warmup) {
+        self.warm_for(need, warmup);
     }
 
     fn reclaim(&mut self) {

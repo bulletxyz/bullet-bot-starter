@@ -29,24 +29,49 @@ pub struct Setting {
     /// `bb setup` asks it. See [`Setting::no_safe_default`].
     #[serde(skip)]
     pub ask: bool,
+    /// The host limit this setting sets (a built-in's only; never in the JSON): the host holds the
+    /// path to the smaller of its value (its default when unset) and the document's limit.
+    #[serde(skip)]
+    pub caps: Option<HostLimit>,
+}
+
+/// A limit the host holds every strategy's order path to, which a setting may set
+/// ([`Setting::caps`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostLimit {
+    MaxPosition,
+    DailyLossUsd,
 }
 
 impl Setting {
     /// `spec` at the top level, optional.
     #[must_use]
     pub fn of(spec: ParamSpec) -> Self {
-        Self { path: spec.name.to_string(), spec, required: false, ask: false }
+        Self { path: spec.name.to_string(), spec, required: false, ask: false, caps: None }
     }
 
     /// `spec` inside table `table`.
     #[must_use]
     pub fn under(table: &str, spec: ParamSpec) -> Self {
-        Self { path: format!("{table}.{}", spec.name), spec, required: false, ask: false }
+        Self {
+            path: format!("{table}.{}", spec.name),
+            spec,
+            required: false,
+            ask: false,
+            caps: None,
+        }
     }
 
     #[must_use]
     pub fn required(mut self) -> Self {
         self.required = true;
+        self
+    }
+
+    /// It sets the host limit `limit` (see [`Setting::caps`]).
+    #[must_use]
+    pub fn caps(mut self, limit: HostLimit) -> Self {
+        self.caps = Some(limit);
         self
     }
 
@@ -91,3 +116,7 @@ impl Setting {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "setting_tests.rs"]
+mod tests;

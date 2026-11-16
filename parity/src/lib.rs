@@ -16,8 +16,8 @@ use std::path::Path;
 
 use bb_strategy_sdk::testing::Market;
 use bb_strategy_sdk::{
-    Event, Intent, MarketFacts, Order, OrderBook, Position, StrategyAdapter, StrategyError,
-    StrategyReport,
+    Event, Intent, LimitsInForce, MarketFacts, Order, OrderBook, Position, StrategyAdapter,
+    StrategyError, StrategyReport,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -37,6 +37,10 @@ struct ViewJson {
     venue_halt: Option<String>,
     path_stop: Option<String>,
     read_started_ms: Option<u64>,
+    #[serde(default)]
+    limits: Option<LimitsInForce>,
+    #[serde(default)]
+    stop: Option<bb_strategy_sdk::stops::StopReason>,
     market: MarketFacts,
     #[serde(default)]
     legs: Vec<Value>,
@@ -62,6 +66,8 @@ impl ViewJson {
             legs: Vec::new(),
             path_stop: self.path_stop,
             read_started_ms: self.read_started_ms,
+            limits: self.limits,
+            stop: self.stop,
         })
     }
 }

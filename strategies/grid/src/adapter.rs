@@ -106,6 +106,8 @@ struct Seen {
 pub struct GridStrategy {
     config: GridConfig,
     history: Option<History>,
+    /// Why the host could not load the range's candles (`adapter/warm.rs`): the start is refused.
+    history_gap: Option<String>,
     limits: HardLimits,
     day_stop: Option<DayStop>,
     hard_stop_hold: Option<HardStopHold>,
@@ -147,6 +149,7 @@ impl GridStrategy {
         Self {
             config,
             history: None,
+            history_gap: None,
             limits: HardLimits::default(),
             day_stop: None,
             hard_stop_hold: None,
@@ -262,3 +265,7 @@ impl GridStrategy {
 #[cfg(test)]
 #[path = "adapter_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "adapter_history_tests.rs"]
+mod history_tests;

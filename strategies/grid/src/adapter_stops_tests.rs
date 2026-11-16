@@ -87,6 +87,47 @@ fn the_hard_stop_holds_the_instance_and_says_why() {
     assert!(resolved, "{start:?}");
 }
 
+/// With no hold from its build, the hard stop asks the host to stand the instance down, once, and
+/// tells the owner why; the daily loss stop stands nothing down (the loss watch holds it).
+#[test]
+fn the_hard_stop_stands_the_instance_down_through_the_port() {
+    let stood = |out: &[Intent]| {
+        out.iter()
+            .filter_map(|i| match i {
+                Intent::StandDown(why) => Some(why.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let (mut grid, _) = running(test_config());
+    let past = book("71.8", "72.0");
+    let out = grid.on_event(&Event::Book, &at(Some(&past), &[], NOON, d("2")));
+    let [why] = stood(&out).try_into().unwrap_or_else(|o| panic!("one stand-down: {o:?}"));
+    assert!(why.contains("hard stop"), "{why}");
+    let raised = out.iter().any(|i| {
+        matches!(i, Intent::Notify(bb_strategy_sdk::Alert::Raise { key, .. }) if key == crate::KEY_HARD_STOP)
+    });
+    assert!(raised, "{out:?}");
+    let out = grid.on_event(&Event::Tick, &at(Some(&mid_book()), &[], NOON + 5_000, d("2")));
+    assert!(stood(&out).is_empty(), "asked once: {out:?}");
+
+    // A build that holds the instance itself is asked instead, as before.
+    let (grid, _) = running(test_config());
+    let mut held = grid.with_hard_stop_hold(Arc::new(|| {}));
+    let out = held.on_event(&Event::Book, &at(Some(&past), &[], NOON, d("2")));
+    assert!(stood(&out).is_empty(), "{out:?}");
+
+    let loss = bb_strategy_sdk::stops::StopReason::DailyLoss {
+        day: bb_strategy_sdk::stops::utc_day(NOON),
+    };
+    let (mut grid, _) = running(test_config());
+    let out = grid.on_event(
+        &Event::Tick,
+        &View { stop: Some(&loss), ..at(Some(&mid_book()), &[], NOON, d("2")) },
+    );
+    assert!(matches!(out[0], Intent::CancelAll) && stood(&out).is_empty(), "{out:?}");
+}
+
 // --- Rule 4: the daily loss stop. ---
 
 #[test]
@@ -113,6 +154,27 @@ fn the_daily_loss_stop_flattens_and_stops_the_grid() {
     assert_eq!(closes(&out), [(Side::Sell, d("1"), true, OrderType::Market)]);
 }
 
+/// The host's daily loss stop, shown in the view, stops the grid as the build's closure does; any
+/// other stop of the host's (a pause, a stale price) leaves the grid to hold, as the path does.
+#[test]
+fn the_hosts_daily_loss_stop_in_the_view_flattens_and_stops_the_grid() {
+    use bb_strategy_sdk::stops::StopReason;
+    let (mut grid, _) = running(test_config());
+    let b = mid_book();
+    let paused = StopReason::Paused;
+    let held = grid
+        .on_event(&Event::Tick, &View { stop: Some(&paused), ..at(Some(&b), &[], NOON, d("1")) });
+    assert!(held.iter().all(|i| !matches!(i, Intent::CancelAll)), "{held:?}");
+    let loss = StopReason::DailyLoss { day: bb_strategy_sdk::stops::utc_day(NOON) };
+    let out = grid.on_event(
+        &Event::Tick,
+        &View { stop: Some(&loss), ..at(Some(&b), &[], NOON + 5_000, d("1")) },
+    );
+    assert!(matches!(out[0], Intent::CancelAll), "{out:?}");
+    assert_eq!(closes(&out), [(Side::Sell, d("1"), true, OrderType::Market)]);
+    assert!(report(&grid)["stopped"].as_str().unwrap().contains("daily loss"));
+}
+
 /// A daily loss stop's cancel that failed is asked again market-wide, a hard stop's as its own.
 #[test]
 fn a_failed_daily_loss_cancel_is_asked_again_market_wide() {
@@ -135,7 +197,11 @@ fn tripped() -> (GridStrategy, OrderBook) {
     let (mut grid, _) = running(test_config());
     let past = book("71.8", "72.0");
     let out = grid.on_event(&Event::Book, &view(Some(&past), &[], NOON));
-    assert!(matches!(out.as_slice(), [Intent::CancelOwn]), "{out:?}");
+    // Flat: its own orders pulled, nothing to close; the instance stood down and the owner told.
+    assert!(
+        matches!(out.as_slice(), [Intent::CancelOwn, Intent::StandDown(_), Intent::Notify(_)]),
+        "{out:?}"
+    );
     (grid, past)
 }
 

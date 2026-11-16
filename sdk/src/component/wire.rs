@@ -204,6 +204,7 @@ pub(crate) fn uncarried(intent: &Intent) -> Uncarried {
         Intent::Notify(_) => "Notify",
         Intent::ClosePosition { .. } => "ClosePosition",
         Intent::SetLimits(_) => "SetLimits",
+        Intent::StandDown(_) => "StandDown",
         Intent::Targets(_) => "Targets",
         Intent::Place(_)
         | Intent::Cancel(_)
@@ -335,6 +336,8 @@ impl OwnedView {
             legs: &self.legs,
             path_stop: self.path_stop.as_deref(),
             read_started_ms: self.read_started_ms,
+            limits: None,
+            stop: None,
         }
     }
 }

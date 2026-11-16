@@ -35,6 +35,8 @@ pub trait ErasedAdapter: Send {
     fn faulted(&self) -> bool;
     fn history(&self) -> Option<HistoryNeed>;
     fn warm_up(&mut self, warmup: Warmup);
+    fn histories(&self) -> Vec<HistoryNeed>;
+    fn warm_up_for(&mut self, need: HistoryNeed, warmup: Warmup);
     fn protective_stop(&self, view: &View<'_>) -> Option<Protection>;
     fn reclaim(&mut self);
     fn restore(&mut self, state: &dyn StateRead) -> Result<(), StrategyError>;
@@ -110,6 +112,14 @@ impl<S: StrategyAdapter> ErasedAdapter for S {
         StrategyAdapter::warm_up(self, warmup);
     }
 
+    fn histories(&self) -> Vec<HistoryNeed> {
+        StrategyAdapter::histories(self)
+    }
+
+    fn warm_up_for(&mut self, need: HistoryNeed, warmup: Warmup) {
+        StrategyAdapter::warm_up_for(self, need, warmup);
+    }
+
     fn protective_stop(&self, view: &View<'_>) -> Option<Protection> {
         StrategyAdapter::protective_stop(self, view)
     }
@@ -126,3 +136,7 @@ impl<S: StrategyAdapter> ErasedAdapter for S {
         StrategyAdapter::may_keep(self)
     }
 }
+
+#[cfg(test)]
+#[path = "erased_tests.rs"]
+mod tests;

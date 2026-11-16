@@ -7,6 +7,7 @@ fn an_intent_the_world_cannot_carry_is_an_error_not_a_drop() {
     use crate::targets::{Direction, Target};
     for intent in [
         Intent::ClosePosition { id: 1 },
+        Intent::StandDown("hold".into()),
         Intent::Targets(vec![Target {
             symbol: "BTC-USD".into(),
             direction: Direction::ShortBullet,
