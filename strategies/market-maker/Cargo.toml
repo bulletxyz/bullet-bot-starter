@@ -1,0 +1,27 @@
+[package]
+license.workspace = true
+# The bot's crate name and strategy name for its market maker (`simple-mm`), kept so v51 instances and the
+# bot's pin find it under the name they know.
+name = "bb-strategy-simple-mm"
+version = "1.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The market maker for bullet-bots: a bid and an ask around a fair value, with inventory skew"
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+bb-strategy-sdk = { workspace = true }
+bb-strategy-support = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rust_decimal = { workspace = true }
+schemars = { workspace = true }
+
+[dev-dependencies]
+bb-strategy-sdk = { workspace = true, features = ["testing"] }

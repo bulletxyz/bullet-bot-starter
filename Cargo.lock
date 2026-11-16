@@ -119,6 +119,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bb-strategy-simple-mm"
+version = "1.0.0"
+dependencies = [
+ "bb-strategy-sdk",
+ "bb-strategy-support",
+ "rust_decimal",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bb-strategy-sma"
 version = "0.1.1"
 dependencies = [
