@@ -46,7 +46,7 @@ Built in: the market maker (start here), grid and RSI momentum.
 [![Build a strategy with Claude Code][badge2]][build]
 
 [badge2]: https://img.shields.io/badge/Build%20a%20strategy-Claude%20Code-D97757?logo=claude&logoColor=white
-[build]: https://claude.ai/code?prompt=Build%20a%20strategy%20plugin%20for%20my%20Bullet%20bot%20and%20install%20it%20on%20paper.%20Follow%20this%20guide%3A%20https%3A%2F%2Fraw.githubusercontent.com%2Fbulletxyz%2Fbullet-bot-starter%2Fmain%2Fskills%2Fbullet-wasm-plugin%2FSKILL.md
+[build]: https://claude.ai/code?q=Build%20a%20strategy%20plugin%20for%20my%20Bullet%20bot%20and%20install%20it%20on%20paper.%20Follow%20this%20guide%3A%20https%3A%2F%2Fraw.githubusercontent.com%2Fbulletxyz%2Fbullet-bot-starter%2Fmain%2Fskills%2Fbullet-wasm-plugin%2FSKILL.md
 
 Use Claude Code, not a regular Claude chat: the button opens it (in the Claude app, the **Code** tab). No message
 filled in? Paste this into Claude Code:
