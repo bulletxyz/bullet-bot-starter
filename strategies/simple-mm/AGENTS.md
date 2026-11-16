@@ -1,4 +1,4 @@
-# market-maker: the bot's market maker (`simple-mm`)
+# simple-mm: the bot's market maker
 
 One bid and one ask on one Bullet market around a fair value, with optional inventory skew and volatility
 widening. `MarketMaker` (`src/adapter.rs`) is a `bb_strategy_sdk::StrategyAdapter`: it keeps its two quotes and
@@ -6,10 +6,9 @@ returns intents. The bot's host owns the inventory, the order path and its gate 
 caps), paper (its paper broker), every guard (daily loss, stale price, fast market, the reject breaker, the venue's
 stale oracle, the reconcile of stray orders, the position resync), the owner's pause, the limits and the state.
 
-**The name.** The folder is `market-maker`; the crate is `bb-strategy-simple-mm` and `Describe::NAME` is
-`simple-mm`, the bot's name for its market maker: v51 instances (`"strategy": "simple-mm"`), their config
-sections (`[strategies.simple-mm]`) and the log prefixes carry it. It is a built-in, not a plugin (no cdylib), so
-`scripts/build.sh`'s folder-name check does not apply.
+**The name.** `simple-mm` is the folder, `Describe::NAME` and the crate's (`bb-strategy-simple-mm`): v51
+instances (`"strategy": "simple-mm"`), their config sections (`[strategies.simple-mm]`) and the log prefixes carry
+it.
 
 **Money-safety code**: `src/cap.rs`, `src/pricing.rs` and `src/pricing/`, `src/params.rs`, `src/adapter.rs` and
 the files under `src/adapter/` need a failing test first, then the fix.

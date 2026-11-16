@@ -1,7 +1,5 @@
 [package]
 license.workspace = true
-# The bot's crate name and strategy name for its market maker (`simple-mm`), kept so v51 instances and the
-# bot's pin find it under the name they know.
 name = "bb-strategy-simple-mm"
 version = "1.0.0"
 edition.workspace = true

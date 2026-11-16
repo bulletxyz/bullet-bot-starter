@@ -5,8 +5,8 @@ use rust_decimal::Decimal;
 
 use crate::MarketMaker;
 
-/// Its name is the bot's name for its market maker, not its folder's: v51 instances, config
-/// sections (`[strategies.simple-mm]`) and log prefixes carry it.
+/// Named for its folder, the bot's name for its market maker: v51 instances, config sections
+/// (`[strategies.simple-mm]`) and log prefixes carry it.
 #[test]
 fn the_market_maker_keeps_the_bots_name_and_lists_every_setting() {
     assert_eq!(MarketMaker::NAME, "simple-mm");
