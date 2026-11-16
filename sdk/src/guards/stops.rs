@@ -1,5 +1,5 @@
 //! The daily loss stop's state: what survives a restart ([`PersistedStops`]), the day's P&L
-//! ([`DayPnl`]) and why quoting or ordering stopped ([`StopReason`]). Shared by the market maker's
+//! ([`DayPnl`]), the account's value at the day's start ([`DayOpen`]) and why quoting or ordering stopped ([`StopReason`]). Shared by the market maker's
 //! guards and the self-trading strategies' loss stop; where the stops are kept is the host's.
 
 use chrono::{DateTime, NaiveDate};
@@ -158,6 +158,10 @@ pub struct PersistedStops {
     /// unchanged).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub day_trading_pnl: Option<Decimal>,
+    /// The account's value at the start of its UTC day ([`DayOpen`]). Written only when set (the
+    /// file's format is unchanged).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub day_start: Option<DayStart>,
     /// The market maker's reject breaker tripped; only the owner's resume clears it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub rejects_tripped: bool,
@@ -196,6 +200,70 @@ pub struct DayMark {
     pub symbol: String,
     pub position: Decimal,
     pub mid: Decimal,
+}
+
+/// The account's value at the first read of a UTC day ([`PersistedStops::day_start`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DayStart {
+    pub day: NaiveDate,
+    pub value: Decimal,
+}
+
+/// The account's value at the start of the UTC day, what the daily loss stop is sized from: the
+/// first read of each day (or, the first day, at go-live: a [`DayOpen::default`]) records it and
+/// nothing moves it that day, neither the day's P&L nor a deposit. A restart goes on from the
+/// saved one ([`Self::load`]).
+#[derive(Debug, Clone, Default)]
+pub struct DayOpen(Open);
+
+#[derive(Debug, Clone, Copy, Default)]
+enum Open {
+    /// No day's start yet: the next read records it.
+    #[default]
+    Unread,
+    Known(DayStart),
+    /// An older version read the account on this day without saving its start: the value now
+    /// may count a deposit made since, so the day has none, and the next day's first read records
+    /// one.
+    Unknown(NaiveDate),
+}
+
+impl DayOpen {
+    /// From the saved stops. A file without a start that an earlier process read today (an older
+    /// version's, or one a writer without it saved) leaves today's start unknown.
+    #[must_use]
+    pub fn load(saved: Option<&PersistedStops>) -> Self {
+        Self(match saved {
+            Some(PersistedStops { day_start: Some(start), .. }) => Open::Known(*start),
+            Some(PersistedStops { day_pnl_day: Some(day), .. }) => Open::Unknown(*day),
+            _ => Open::Unread,
+        })
+    }
+
+    /// A read of the account's `value` at `now_ms`: the day's start value, recorded if this is the
+    /// day's first read. `None` while today's start is unknown: no new orders until the next day.
+    /// The day never goes backwards: a clock stepping back keeps the day's start.
+    pub fn read(&mut self, value: Decimal, now_ms: u64) -> Option<Decimal> {
+        let now = utc_day(now_ms);
+        match self.0 {
+            Open::Known(start) if now <= start.day => Some(start.value),
+            Open::Unknown(day) if now <= day => None,
+            _ => {
+                self.0 = Open::Known(DayStart { day: now, value });
+                Some(value)
+            }
+        }
+    }
+
+    /// What to save in [`PersistedStops::day_start`]. An unknown start saves none: the saved
+    /// `day_pnl_day` of that day keeps it unknown over a restart.
+    #[must_use]
+    pub fn to_persist(&self) -> Option<DayStart> {
+        match self.0 {
+            Open::Known(start) => Some(start),
+            Open::Unread | Open::Unknown(_) => None,
+        }
+    }
 }
 
 /// Day P&L: the change in total net P&L since the first observation of the
