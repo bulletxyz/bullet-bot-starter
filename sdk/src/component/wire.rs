@@ -204,6 +204,7 @@ pub(crate) fn uncarried(intent: &Intent) -> Uncarried {
         Intent::Notify(_) => "Notify",
         Intent::ClosePosition { .. } => "ClosePosition",
         Intent::SetLimits(_) => "SetLimits",
+        Intent::StandDown(_) => "StandDown",
         Intent::Targets(_) => "Targets",
         Intent::Place(_)
         | Intent::Cancel(_)

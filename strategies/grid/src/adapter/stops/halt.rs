@@ -86,7 +86,7 @@ impl GridStrategy {
         self.state.clear_all();
         // Only the hard stop pulls its own orders; the loss watch holds a daily loss trip.
         let hard = matches!(pull, Intent::CancelOwn);
-        let said = hard.then(|| self.hold_for_hard_stop(&reason)).flatten();
+        let said = if hard { self.hold_for_hard_stop(&reason) } else { Vec::new() };
         self.halt = Some(Halt { reason, attempts: 1, pull: pull.clone() });
         let mut out = vec![pull];
         out.extend(self.close(view, 1));
@@ -94,17 +94,24 @@ impl GridStrategy {
         Some(out)
     }
 
-    /// Ask the instance's hold for the hard stop, and what the owner is told of it (none without a
-    /// hold: nothing holds the grid past its run).
-    fn hold_for_hard_stop(&self, reason: &str) -> Option<Intent> {
-        let hold = self.hard_stop_hold.as_ref()?;
+    /// Hold the instance for the hard stop (the build's hold, else the host's stand-down, after the
+    /// close), and what the owner is told of it.
+    fn hold_for_hard_stop(&self, reason: &str) -> Vec<Intent> {
         tracing::warn!(%reason, "Grid hard stop: holding the instance until the owner resumes");
-        hold();
+        let mut out = Vec::new();
+        match &self.hard_stop_hold {
+            Some(hold) => hold(),
+            None => out.push(Intent::StandDown(format!("grid {reason}"))),
+        }
         let text = format!(
             "Grid {reason}: it closed its position and stays held, through a restart too, until you \
              resume it. A resume starts a new grid at the price then."
         );
-        Some(Intent::Notify(bb_strategy_sdk::Alert::Raise { key: KEY_HARD_STOP.to_string(), text }))
+        out.push(Intent::Notify(bb_strategy_sdk::Alert::Raise {
+            key: KEY_HARD_STOP.to_string(),
+            text,
+        }));
+        out
     }
 
     /// While the stop's cancel has not landed orders may still rest, so it is asked again, the same kind.

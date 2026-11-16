@@ -71,9 +71,9 @@ The bot's built-in strategies run on the same trait and also get `Reference`, `C
   until_ms }`. Answered once by `Event::Answer` with the same `id`; don't reuse an id in flight.
 - `Leg { leg, intent }`: an intent on a declared leg (`TRADE_LEG`, `"trade"`, is the main one).
 - `Shutdown`: never; the bot faults a plugin that sends it. To stop, cancel and send nothing more.
-- `Reply`, `Persist`, `ClosePosition`, `SetLimits`, `Targets`: for the bot's built-in strategies only. A plugin
-  that returns one faults (the component traps): never return them. A plugin's `CancelOwn` crosses as `CancelAll`
-  and its `Notify` is dropped.
+- `Reply`, `Persist`, `ClosePosition`, `SetLimits`, `StandDown`, `Targets`: for the bot's built-in strategies only.
+  A plugin that returns one faults (the component traps): never return them. A plugin's `CancelOwn` crosses as
+  `CancelAll` and its `Notify` is dropped.
 
 At most 64 intents a call.
 

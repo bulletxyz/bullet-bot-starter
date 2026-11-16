@@ -42,7 +42,7 @@ just new my-strategy      # strategies/my-strategy/ from templates/strategy
 
 The folder name is the plugin's name: `Describe::NAME` must be the same. Bump `version` in its
 `Cargo.toml` for every change. No I/O, clock, randomness or `tracing`: time is `View::now_ms`. Never
-return `Reply`, `Persist`, `ClosePosition`, `SetLimits` or `Targets`: they are the bot's built-ins' only,
+return `Reply`, `Persist`, `ClosePosition`, `SetLimits`, `StandDown` or `Targets`: they are the bot's built-ins' only,
 and a plugin that returns one faults (`CancelOwn` crosses as `CancelAll`, `Notify` is dropped). More to copy from:
 `strategies/ladder/` (retries, unknown outcomes, venue reads) and `sma` (past candles; up to 999 bars at
 start).

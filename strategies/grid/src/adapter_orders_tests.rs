@@ -137,7 +137,11 @@ fn an_order_answered_after_its_level_let_go_is_cancelled() {
     let order = placements(&intents)[0].clone();
     let past = book("71.8", "72.0");
     let out = grid.on_event(&Event::Book, &view(Some(&past), &[], NOON + 100));
-    assert!(matches!(out.as_slice(), [Intent::CancelOwn]), "{out:?}");
+    // Flat: its own orders pulled, nothing to close; the instance stood down and the owner told.
+    assert!(
+        matches!(out.as_slice(), [Intent::CancelOwn, Intent::StandDown(_), Intent::Notify(_)]),
+        "{out:?}"
+    );
     let out = grid.on_event(&acked(&order), &view(Some(&past), &[], NOON + 200));
     assert_eq!(cancels(&out), [order.client_id.clone().unwrap()], "{out:?}");
     // A refusal leaves nothing resting: nothing to cancel.

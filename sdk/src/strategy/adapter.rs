@@ -414,7 +414,7 @@ impl Event {
 }
 
 /// What a strategy asks the host to do (exhaustive, see [`Event`]). Every order passes the host's gate. A plugin
-/// faults on `Reply`, `Persist`, `ClosePosition`, `SetLimits` or `Targets`; its `CancelOwn` crosses as
+/// faults on `Reply`, `Persist`, `ClosePosition`, `SetLimits`, `StandDown` or `Targets`; its `CancelOwn` crosses as
 /// `CancelAll` (its own orders only) and its `Notify` is dropped.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Intent {
@@ -430,6 +430,10 @@ pub enum Intent {
     Amend(AmendOrder),
     /// Stop the bot, with the reason (e.g. a config that can't run).
     Shutdown(String),
+    /// Hold the instance for safety, with the reason: the supervisor's safety hold, kept through
+    /// a restart until the owner resumes it. The strategy closes what it holds itself first, in
+    /// the same round or before.
+    StandDown(String),
     /// Answer the command [`Event::Control`] delivered under `id`. The host sends the reply to the
     /// caller; an id it does not know (already answered) is ignored.
     Reply {

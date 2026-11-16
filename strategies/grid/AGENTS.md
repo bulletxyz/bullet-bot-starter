@@ -1,12 +1,13 @@
 # grid
 
-Futures grid on Bullet (V1). `GridStrategy` (`src/adapter.rs`) is a `bb_strategy_sdk::StrategyAdapter`: it holds
-only the level state and returns `Intent`s; the bot's strategy host places them and owns the inventory, the clock,
-the book, the venue reads, paper and the snapshot. The bot reads the price history when the range or the levels are
-derived: its build passes it (`with_history`), or its host loads the daily and hourly candles the grid lists in
-`histories()` (a load that fails refuses the start with the host's reason), and passes the hard limits (`limits.max_position`,
-`limits.max_notional_usd`, live only; `View::limits` when its host shows them, else the build's `with_limits`) and the daily loss stop (`View::stop`, or the build's `with_day_stop`). The mode is the bot's (paper until the owner's
-signed go-live), as for every strategy.
+Futures grid on Bullet (V1). `GridStrategy` (`src/adapter.rs`) is a `bb_strategy_sdk::StrategyAdapter`: it holds only
+the level state and returns `Intent`s; the bot's strategy host places them and owns the inventory, the clock, the book,
+the venue reads, paper and the snapshot. The bot reads the price history when the range or the levels are derived: its
+build passes it (`with_history`), or its host loads the daily and hourly candles the grid lists in `histories()` (a load
+that fails refuses the start with the host's reason), and passes the hard limits (`limits.max_position`,
+`limits.max_notional_usd`, live only; `View::limits` when its host shows them, else the build's `with_limits`) and the
+daily loss stop (`View::stop`, or the build's `with_day_stop`). The mode is the bot's (paper until the owner's signed
+go-live), as for every strategy.
 
 The candles: Binance's USDT-M perp first. It refuses US addresses (HTTP 451; 403 too), and many bots run in US
 regions, so on a block or a connection failure the bot reads the spot candles of the same symbol from Binance's
@@ -90,10 +91,11 @@ only when both fail. Bullet has no REST candles (only a WS kline topic).
 5. `report()` shows `pnl.realized`, `pnl.unrealized` and `pnl.total` of the whole position from the host's view
    (`the_report_shows_realized_and_unrealized_of_the_whole_position`).
 
-A stopped grid stays stopped for the run. Its hard stop also holds the instance for safety (the grid asks the bot
-for a hold and raises `grid_hard_stop` to say why), so a restart starts held, never a new grid at the then-current
-mid; the owner's resume starts one, whose start resolves the alert
-(`the_hard_stop_holds_the_instance_and_says_why`).
+A stopped grid stays stopped for the run. Its hard stop also holds the instance for safety (the grid asks the bot for a
+hold, the build's `with_hard_stop_hold` or else `Intent::StandDown`, and raises `grid_hard_stop` to say why), so a
+restart starts held, never a new grid at the then-current mid; the owner's resume starts one, whose start resolves the
+alert (`the_hard_stop_holds_the_instance_and_says_why`, `the_hard_stop_stands_the_instance_down_through_the_port`).
+Until the build's hold goes, only a start with one resolves the alert.
 
 ## Files
 
@@ -108,13 +110,20 @@ mid; the owner's resume starts one, whose start resolves the alert
 - The grid keeps issuing client ids for its levels (`ClientIdIssuer`): `Event::Outcome` and `Event::Fill` find a
   level by client id.
 - Tests: `adapter_tests.rs` (call `on_event` on a hand-built `View`; by behaviour in `adapter_direction_tests.rs`,
-  `adapter_orders_tests.rs`, `adapter_pauses_tests.rs`, `adapter_stops_tests.rs`), `plan_tests.rs`,
-  `derive_tests.rs`, `levels_tests.rs`, `config_tests.rs`; `adapter_keep_tests.rs`: the reclaim
-  (`adapter/reclaim.rs`) and the kept shutdown; `tests/parity.rs` replays the calls the strategy's tests made under
-  the bot's host
+  `adapter_orders_tests.rs`, `adapter_pauses_tests.rs`, `adapter_stops_tests.rs`), `plan_tests.rs`, `derive_tests.rs`,
+  `levels_tests.rs`, `config_tests.rs`; `adapter_keep_tests.rs`: the reclaim (`adapter/reclaim.rs`) and the kept
+  shutdown; `tests/parity.rs` replays the calls the strategy's tests made under the bot's host
   (`parity/fixtures/grid/`), so its intents must stay what they were. The tests that run the full host (order path,
-  paper, stops) live in the bot. Edited, not re-recorded, for the settle margin on an acked level (a read within 2 s
-  of the acks no longer frees them): `the_fallback_note_goes_once_the_filter_has_warmed_live` (its last tick places
+  paper, stops) live in the bot. Edited, not re-recorded, for the settle margin on an acked level (a read within 2 s of
+  the acks no longer frees them): `the_fallback_note_goes_once_the_filter_has_warmed_live` (its last tick places
   nothing, and the outcomes of the orders it no longer sends are gone),
   `a_tick_replaces_a_level_the_venue_no_longer_shows` (its tick, in the ms of the acks, places nothing) and
-  `below_the_range_but_above_the_stop_the_grid_holds` (its headline counts the two held buys).
+  `below_the_range_but_above_the_stop_the_grid_holds` (its headline counts the two held buys). Edited for the stand-down
+  (a hard stop with no build hold now ends its round with `StandDown` and the `grid_hard_stop` alert; the bot's host
+  tests ran without a hold, so none was recorded): the hard stop's round in
+  `past_the_hard_stop_it_cancels_its_own_orders_closes_reduce_only_and_stops`,
+  `the_short_sides_hard_stop_is_above_the_range_and_buys_back`,
+  `the_hard_stops_close_goes_through_the_path_sized_to_the_venue_position`,
+  `a_failed_cancel_all_is_asked_again_on_the_next_tick_until_it_lands`,
+  `a_cancel_all_that_failed_as_a_whole_is_asked_again_too` and
+  `the_owner_is_told_after_five_failed_cancel_alls_in_a_row_and_the_grid_keeps_trying`.
