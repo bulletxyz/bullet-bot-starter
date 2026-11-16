@@ -3,11 +3,18 @@
 //! widening, capped at the position and notional limits. A pure strategy on the SDK port: the
 //! host runs its orders, paper, guards, pause, limits and state.
 
+pub mod adapter;
+mod cap;
+mod describe;
 pub mod params;
 pub mod pricing;
 pub mod report;
 pub mod settings;
 
+pub use adapter::MarketMaker;
 pub use params::{FairValue, MmParams};
 pub use report::MarketMakerReport;
 pub use settings::MarketMakerSettings;
+
+#[cfg(test)]
+mod purity_tests;
