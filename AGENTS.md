@@ -21,7 +21,8 @@ just ci              # fmt, clippy -D warnings, tests, build
 - `support/`: small pure helpers the built-ins share (client ids, inventory tracker, IOC price cap, close price,
   funding math).
 - `strategies/<name>/`: one crate each. `ladder` and `sma` are example plugins. `grid`, `rsi-momentum`,
-  `avellaneda-stoikov`, `funding-arb` and `simple-funding` are the bot's own built-ins: it imports them as git
+  `market-maker` (the bot's `simple-mm`), `avellaneda-stoikov`, `funding-arb` and `simple-funding` are the bot's
+  own built-ins: it imports them as git
   dependencies and runs them natively; they also build for `wasm32-wasip2`, but are not plugins yet. `parity/`: the
   recorded calls of the built-ins (grid, rsi-momentum) and their replay. Keep them green; a change that makes a
   fixture differ is a change in behaviour: say so in that strategy's `AGENTS.md`.
