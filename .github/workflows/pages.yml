@@ -1,5 +1,5 @@
 # Publishes site/ to GitHub Pages. GitHub strips claude:// links from rendered Markdown, so the
-# README's Deploy button points at site/deploy/, an https page that opens claude:// for the visitor.
+# README's buttons point at site/deploy/ and site/build/, https pages that open claude:// for the visitor.
 name: Pages
 
 on:
