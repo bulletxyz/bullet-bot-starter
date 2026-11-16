@@ -1,0 +1,77 @@
+/* The bot page's look (bullet-bots, crates/adapters/api/http/sign/bb.css: the glow, the lime mark, a
+   Martian Mono heading, one lime pill and a glass button), kept to what this page uses. Take a value
+   from bb.css rather than inventing one. Fonts: SIL Open Font License 1.1 (fonts/). */
+@font-face { font-family: Inter; font-style: normal; font-weight: 400; font-display: swap; src: url(fonts/inter-400.woff2) format("woff2"); }
+@font-face { font-family: Inter; font-style: normal; font-weight: 500; font-display: swap; src: url(fonts/inter-500.woff2) format("woff2"); }
+@font-face { font-family: Inter; font-style: normal; font-weight: 600; font-display: swap; src: url(fonts/inter-600.woff2) format("woff2"); }
+@font-face { font-family: "Martian Mono"; font-style: normal; font-weight: 500; font-display: swap; src: url(fonts/martian-mono-500.woff2) format("woff2"); }
+:root {
+  color-scheme: dark;
+  --bg: #0D0C0B; --fg: #E3EFFF; --text-2: #8BADB3; --ok: #5FCDB4; --ok-bg: #5FCDB41F;
+  --lime: #E5FF7E; --brand-fg: #0D0C0B; --fill: #E3EFFF0D; --fill-hover: #E3EFFF1A; --line: #E3EFFF1A;
+  --font: Inter, system-ui, sans-serif; --display: "Martian Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; --features: "ss01", "tnum";
+  --glass-fill: linear-gradient(180deg, #FFFFFF14, #FFFFFF05); --glass-line: #FFFFFF14;
+  --glass-shadow: inset 0 1px 0 #FFFFFF24, 0 8px 32px #00000059; --glass-blur: blur(24px) saturate(160%);
+  --cta-fill: linear-gradient(180deg, #F2FFA8 0%, #E5FF7E 55%, #D5F06B 100%);
+  --cta-shadow: inset 0 1px 0 #FFFFFFB3, 0 10px 28px #E5FF7E47;
+  --field-fill: #FFFFFF0A; --focus: 0 0 0 2px #F8FFE1;
+  --glow-setup: radial-gradient(closest-side, #E5FF7E38 0%, #E5FF7E0F 40%, transparent 70%);
+  --ease-out: cubic-bezier(.2, .8, .2, 1); --press: cubic-bezier(.4, 0, .2, 1);
+  --home-w: 440px; --home-pad: 24px; --home-bar-h: 64px; --home-cta-h: 56px; --home-glass-h: 48px; --icon: 24px;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; min-height: 100dvh; overflow-x: hidden; background: var(--bg); color: var(--fg);
+       font: 400 14px/18px var(--font); font-feature-settings: var(--features); }
+button, textarea { font-feature-settings: var(--features); }
+
+/* Setup's glow: an orb that drifts, its gradient fading well inside its own box. */
+.glow { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.glow::before { content: ""; position: absolute; left: calc(20% - 420px); top: -420px; width: 840px; height: 840px;
+                background: var(--glow-setup); animation: drift 9s ease-in-out infinite; }
+
+main { position: relative; z-index: 1; width: 100%; max-width: var(--home-w); min-height: 100vh; min-height: 100dvh;
+       margin: 0 auto; padding: 0 var(--home-pad) calc(16px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; }
+.topbar { height: var(--home-bar-h); display: flex; align-items: center; flex: none; }
+.topbar svg { width: 55.3px; height: 16px; color: var(--lime); fill: currentColor; display: block; }
+
+h1 { margin: 48px 0 0; font: 500 30px/1.15 var(--display); letter-spacing: -.5px; }
+.lead { margin: 12px 0 0; font-size: 16px; line-height: 1.5; color: var(--text-2); }
+.label { margin: 32px 0 8px; font-size: 14px; line-height: 20px; color: var(--text-2); }
+.fine { margin: 12px 0 0; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+.fine a { color: var(--fg); text-decoration: none; border-bottom: 1px solid var(--lime); }
+.fine a:hover { color: var(--lime); }
+
+.actions { margin-top: 32px; display: flex; flex-direction: column; gap: 8px; }
+/* The one lime action: solid, with a top sheen. */
+.cta, .glass-button { display: flex; align-items: center; justify-content: center; width: 100%; margin: 0; padding: 0 16px;
+                      text-decoration: none; cursor: pointer; transition: transform 150ms var(--press); }
+.cta { height: var(--home-cta-h); border: 0; border-radius: 28px; color: var(--brand-fg); background: var(--cta-fill);
+       box-shadow: var(--cta-shadow); font: 600 17px/1 var(--font); }
+.glass-button { height: var(--home-glass-h); border-radius: 24px; color: var(--fg); background: var(--glass-fill);
+                border: 1px solid var(--glass-line); box-shadow: var(--glass-shadow);
+                -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); font: 600 15px/1 var(--font); }
+.cta:active, .glass-button:active { transform: scale(.97); }
+
+/* A value to copy: the text with a copy icon inside its right edge, a tick once copied. */
+.copy { position: relative; }
+.copy textarea { display: block; width: 100%; padding: 12px 2.8rem 12px 14px; resize: none; overflow: hidden;
+                 overflow-wrap: anywhere; color: var(--fg); background: var(--field-fill); border: 1px solid var(--glass-line);
+                 border-radius: 14px; font: 400 12px/16px var(--mono); }
+.copy .copy-icon { position: absolute; top: 8px; right: 8px; width: var(--icon); height: var(--icon); padding: 4px;
+                   display: flex; align-items: center; justify-content: center; color: var(--text-2); background: var(--fill);
+                   border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+.copy .copy-icon svg { width: 100%; height: 100%; }
+.copy .copy-icon:hover { color: var(--fg); background: var(--fill-hover); }
+.copy .copy-icon.done { color: var(--ok); background: var(--ok-bg); border-color: transparent; }
+
+a:focus-visible, button:focus-visible, textarea:focus-visible { outline: none; box-shadow: var(--focus); }
+
+.rise { animation: rise 700ms var(--ease-out) both; }
+.rise.d1 { animation-delay: 80ms; }
+.rise.d2 { animation-delay: 160ms; }
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes drift { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(18px, 10px) scale(1.06); } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
