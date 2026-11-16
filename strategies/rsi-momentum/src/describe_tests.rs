@@ -66,3 +66,18 @@ fn rsi_momentum_reads_the_mark_resyncs_in_two_ticks_and_flattens_on_the_way_out(
         Needs { feeds: vec![Feed::Mark], resync: Some(2), flatten_on_wind_down: true }
     );
 }
+
+/// What the bot took as rsi-momentum's own limits by name: its position cap and its loss stop.
+#[test]
+fn rsi_momentum_names_the_host_limits_its_position_cap_and_loss_stop_set() {
+    use bb_strategy_sdk::HostLimit;
+    let caps: Vec<_> =
+        crate::settings().into_iter().filter_map(|s| s.caps.map(|c| (s.path, c))).collect();
+    assert_eq!(
+        caps,
+        [
+            ("max_position".to_string(), HostLimit::MaxPosition),
+            ("daily_loss_usd".to_string(), HostLimit::DailyLossUsd)
+        ]
+    );
+}

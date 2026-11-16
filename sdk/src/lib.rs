@@ -29,7 +29,7 @@ pub use config::{param_spec, text_format};
 pub use guards::{alert_keys, stops};
 pub use host::targets;
 
-pub use config::setting::{Setting, ValidateConfig};
+pub use config::setting::{HostLimit, Setting, ValidateConfig};
 pub use erased_serde::Serialize as ErasedSerialize;
 pub use history::candles::{Candle, CandleInterval, HistoryNeed, MAX_HISTORY_CANDLES, Warmup};
 pub use history::records::{

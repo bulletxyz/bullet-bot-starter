@@ -37,7 +37,8 @@ under way; the next start takes it over: the host seeds it and the stop and exit
   `rsi_momentum_close_failing` (`Intent::Notify`), which stays raised until the next start (the
   owner's resume) resolves it.
 - **Live** needs an explicit `daily_loss_usd` and a state directory (`config.rs`); the bot gives the host
-  `max_position` and `daily_loss_usd` (paper default `DEFAULT_DAILY_LOSS_USD`) as its limits.
+  `max_position` and `daily_loss_usd` (paper default `DEFAULT_DAILY_LOSS_USD`) as its limits (each names the limit it
+  sets: `Setting::caps`).
 
 ## Behaviour that changed with the port (intentional)
 

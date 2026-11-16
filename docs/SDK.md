@@ -106,7 +106,7 @@ At most 64 intents a call.
 `.loosening(Loosening::Up)`, `.required()`), `settings_schema: schemars::schema_for!(Settings)`, and
 `legs` (`LegNeed::new(id, venue)` per extra venue account). `Tier::Limit` with `Loosening::Up` means
 raising it needs the owner's signature. Name settings as you like: the bot never reads one as its
-own limit.
+own limit (only a built-in names the bot limit a setting sets, with `Setting::caps`).
 
 ## Past candles
 
