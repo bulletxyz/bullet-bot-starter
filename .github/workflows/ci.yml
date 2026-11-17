@@ -53,6 +53,7 @@ jobs:
         run: >-
           cargo build --locked --target wasm32-wasip2 -p bb-strategy-grid -p bb-strategy-rsi-momentum
           -p bb-strategy-avellaneda-stoikov -p bb-strategy-funding-arb -p bb-strategy-simple-funding
+          -p bb-strategy-simple-mm
       - name: Build the components
         run: scripts/build.sh
       - name: Hashes
