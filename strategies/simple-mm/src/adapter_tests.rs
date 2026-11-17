@@ -141,6 +141,48 @@ fn the_first_book_places_both_sides_and_their_answers_make_the_slots() {
     assert_eq!(r.slot(Side::Sell).unwrap().order_id.as_deref(), Some("v-2"));
 }
 
+/// The snapshot shows the quotes as the market maker holds them, not the venue's last read: both
+/// at once after their answers, and none once the host cancelled them.
+#[test]
+fn the_snapshot_shows_the_quotes_it_holds() {
+    let mut r = Rig::new(&json!({}));
+    assert_eq!(r.mm.snapshot_extras().quotes, Some(Vec::new()), "nothing quoted yet");
+    let sent = r.book("99", "101");
+    r.take(&sent);
+    let shown: Vec<(Side, Decimal, Decimal, Option<String>)> =
+        r.mm.snapshot_extras()
+            .quotes
+            .unwrap()
+            .into_iter()
+            .map(|o| (o.side, o.price, o.quantity, o.client_id))
+            .collect();
+    assert_eq!(
+        shown,
+        [
+            (Side::Buy, d("99.900"), d("0.1"), Some(cid_of(&sent[0]))),
+            (Side::Sell, d("100.100"), d("0.1"), Some(cid_of(&sent[1]))),
+        ]
+    );
+    r.mm.orders_cancelled();
+    let extras = r.mm.snapshot_extras();
+    assert_eq!(extras.quotes, Some(Vec::new()));
+    // The rest of the snapshot is the host's.
+    let SnapshotExtras {
+        quotes: _,
+        stop,
+        halt,
+        day_pnl_net,
+        realized_pnl,
+        fills_today,
+        paper_fills_today,
+        fee_tier,
+        live_position_in_paper,
+    } = extras;
+    assert!(stop.is_none() && halt.is_none() && day_pnl_net.is_none() && realized_pnl.is_none());
+    assert!(fills_today.is_none() && paper_fills_today.is_none() && fee_tier.is_none());
+    assert!(live_position_in_paper.is_none());
+}
+
 /// Under the drift threshold nothing moves; past it both quotes are repriced, each in one amend
 /// of the resting order.
 #[test]

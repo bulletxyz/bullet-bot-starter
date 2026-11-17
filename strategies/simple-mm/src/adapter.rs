@@ -19,7 +19,8 @@
 //! - `Control` and `Closed`: `adapter/control.rs`.
 
 use bb_strategy_sdk::{
-    CancelOrder, Event, Intent, OrderBook, Side, StrategyAdapter, StrategyError, View,
+    CancelOrder, Event, Intent, Order, OrderBook, OrderStatus, Side, SnapshotExtras,
+    StrategyAdapter, StrategyError, View,
 };
 use bb_strategy_support::ClientIdIssuer;
 use rust_decimal::Decimal;
@@ -296,6 +297,23 @@ impl StrategyAdapter for MarketMaker {
             fair_value: self.fair.map(|f| f.price),
             basis_bps: self.fair.and_then(|f| f.basis_bps),
         }
+    }
+
+    /// The quotes as it holds them: the venue's last read lags a place or a cancel by a read.
+    fn snapshot_extras(&self) -> SnapshotExtras {
+        let symbol = self.symbol();
+        let quotes = self.slots.iter().flatten().map(|s| Order {
+            id: s.order_id.clone().unwrap_or_default(),
+            client_id: Some(s.client_id.clone()),
+            symbol: symbol.to_string(),
+            side: s.side,
+            order_type: self.settings.order_type,
+            price: s.price,
+            quantity: s.size,
+            filled_quantity: Decimal::ZERO,
+            status: OrderStatus::Open,
+        });
+        SnapshotExtras { quotes: Some(quotes.collect()), ..SnapshotExtras::default() }
     }
 
     fn orders_cancelled(&mut self) {

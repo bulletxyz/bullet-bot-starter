@@ -78,7 +78,9 @@ the `btc-conservative` and `eth-balanced` presets, and the reference feed (`need
   the host's.
 - A refused amend's old quote is cancelled again before anything is placed (it may still rest).
 - The guards, the gate, the order rate, the account's checks, paper, the saved stops, the journal, the history
-  and the snapshot's quotes and `/status` keys are the host's; the pause is not saved by the strategy.
+  and the `/status` keys are the host's; the pause is not saved by the strategy. Of the snapshot the market maker
+  supplies only its quotes (`snapshot_extras`: its two slots, as the old one showed them), since the venue's last
+  read lags a place or a cancel by a read.
 - `paper_quoting_secs` counts any run's time quoting: the strategy cannot tell paper from live.
 - The close's reply no longer says "on paper".
 

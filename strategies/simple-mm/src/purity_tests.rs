@@ -1,5 +1,6 @@
 //! The market maker is a strategy and nothing else: no clock, no history, no store, no log. The
-//! host owns all of them; a name here that reaches for one fails.
+//! host owns all of them; a name here that reaches for one fails. Of the snapshot it supplies only
+//! its quotes (`adapter_tests.rs`).
 
 use std::path::Path;
 
@@ -60,7 +61,6 @@ fn the_crate_names_no_history_no_store_and_no_log() {
         "fs",
         "tracing",
         "OwnBook",
-        "SnapshotExtras",
         "StartMode",
     ];
     for (file, text) in production() {
