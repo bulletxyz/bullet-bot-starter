@@ -70,7 +70,7 @@ pub struct MarketMakerSettings {
     pub extra: BTreeMap<String, Decimal>,
     // Keys a v51 section holds that are no longer the strategy's: the mode and the state
     // directory are the instance's, the in-flight cap and the guards the host's. Accepted so
-    // a v51 section loads; never read.
+    // a v51 section loads; never read, the in-flight cap only held to the range v51 accepted.
     #[serde(default, rename = "dry_run")]
     #[schemars(skip)]
     _dry_run: IgnoredAny,
@@ -79,7 +79,7 @@ pub struct MarketMakerSettings {
     _state_dir: IgnoredAny,
     #[serde(default, rename = "max_inflight")]
     #[schemars(skip)]
-    _max_inflight: IgnoredAny,
+    max_inflight: Option<u64>,
     #[serde(default, rename = "guards")]
     #[schemars(skip)]
     _guards: IgnoredAny,
@@ -136,6 +136,9 @@ fn default_order_type() -> OrderType {
 /// Far above the market maker's two placements per refresh.
 pub const DEFAULT_MAX_ORDERS_PER_MIN: u32 = 600;
 
+/// The largest in-flight cap a v51 section may hold.
+pub const MAX_INFLIGHT: u64 = 2;
+
 fn default_max_orders_per_min() -> u32 {
     DEFAULT_MAX_ORDERS_PER_MIN
 }
@@ -188,6 +191,9 @@ impl ValidateConfig for MarketMakerSettings {
         }
         if self.max_orders_per_min == 0 {
             return Err("max_orders_per_min must be >= 1".into());
+        }
+        if self.max_inflight.is_some_and(|n| !(1..=MAX_INFLIGHT).contains(&n)) {
+            return Err(format!("max_inflight must be between 1 and {MAX_INFLIGHT}"));
         }
         if let Some(cap) = self.max_notional_usd {
             positive(cap, "max_notional_usd")?;

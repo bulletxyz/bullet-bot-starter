@@ -79,6 +79,18 @@ fn a_v51_section_loads_with_the_keys_that_are_no_longer_its_own() {
     assert!(parse(v).unwrap_err().to_string().contains("spread"));
 }
 
+/// A v51 section's in-flight cap is held to the range v51 accepted: 1 to 2.
+#[test]
+fn a_v51_in_flight_cap_outside_its_range_is_refused() {
+    for ok in [1, 2] {
+        with(&json!({"max_inflight": ok})).validate().unwrap();
+    }
+    for bad in [0, 3] {
+        let why = with(&json!({"max_inflight": bad})).validate().unwrap_err();
+        assert_eq!(why, "max_inflight must be between 1 and 2");
+    }
+}
+
 #[test]
 fn binance_symbol_defaults_to_base_usdt() {
     assert_eq!(with(&json!({})).binance_symbol(), "BTCUSDT");
