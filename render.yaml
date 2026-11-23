@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: bullet-bot
+    runtime: image
+    image:
+      url: ghcr.io/bulletxyz/bullet-bots:v55
+    region: singapore
+    plan: starter
+    numInstances: 1
+    healthCheckPath: /health
+    dockerCommand: >-
+      /bin/sh -ec 'export BB__API__HTTP__PUBLIC_HOST="${RENDER_EXTERNAL_HOSTNAME:?}";
+      exec /usr/local/bin/start.sh'
+    disk:
+      name: bot-data
+      mountPath: /data
+      sizeGB: 1

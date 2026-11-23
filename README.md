@@ -5,6 +5,21 @@ write your own strategies for it.
 
 ## 1. Get your bot
 
+### Deploy to Render
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)][render-deploy]
+
+[render-deploy]: https://render.com/deploy?repo=https://github.com/bulletxyz/bullet-bot-starter
+
+1. **Click Deploy to Render** and approve the paid service. Render starts your bot in Singapore.
+2. **Open Logs** for `bullet-bot` in Render and look for **Open your bot to make it yours**.
+3. **Open that link** and use your Solana wallet to claim your bot.
+4. **Choose Paper trading** to try it without funding it.
+
+Keep the claim link private. Connect Claude from your bot’s page if you want to manage it from chat.
+
+### Or deploy with Claude Code on Railway
+
 [![Deploy with Claude Code][badge]][deploy]
 
 [badge]: https://img.shields.io/badge/Deploy%20with-Claude%20Code-D97757?logo=claude&logoColor=white
