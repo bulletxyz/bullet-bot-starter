@@ -6,7 +6,7 @@ funding, connecting Claude). Normally the user gets two messages from you: Messa
 and Message 2 (section D). The other texts below are for the cases they name.
 
 If a step needs a Railway action you have no tool for (reading deployments or regions, creating a
-service or volume, deleting a project), give exactly that action to `railway-agent` with the ids and
+service or volume), give exactly that action to `railway-agent` with the ids and
 exact values, ask it to return the ids of anything it creates, and use what it reports.
 
 ## Rules
@@ -104,22 +104,32 @@ for a step when there is one; otherwise `railway-agent`, adding "Do not deploy."
    deployments: any at all, go straight to the failure rule below.
 2. `update-service` with `regions` set to exactly `{"asia-southeast1-eqsg3a": {"numReplicas": 1}}`.
    One replica only: two copies would trade twice.
-3. Add a volume to the service, mounted at `/data`. A new volume takes its service's region.
+3. Add a volume to the service, mounted at `/data`, with its region set explicitly to
+   `asia-southeast1-eqsg3a`. Never leave the region out: a service that has never deployed has no
+   region of its own yet, so Railway puts the volume in the workspace's default region (usually the
+   US) even after step 2.
 4. Generate the service's public domain. This is `<domain>`.
 5. **Check before the image goes on.** Read the service's deployments, its regions and the volume's
    region. Go on only if there are no deployments and both regions are `asia-southeast1-eqsg3a`
    alone (a volume region no tool can read: go on).
 6. Set the service's source to the image `ghcr.io/bulletxyz/bullet-bots:latest`. Add no variables.
 7. Read the deployments. One exists (step 6 started it): go to C4. None: `accept-deploy`, then
-   read them again; still none: `redeploy`. Still none: delete the project and go to C6.
+   read them again; still none: `redeploy`. Still none: go to C6.
 
-If the check in step 1 or 5 fails: delete the project (by its id) and start again at C2 step 2, in
-the same workspace without asking again. Never migrate it: nobody owns that bot yet, so nothing is
-lost. If the restarted attempt fails too, or a step other than a delete can't be done even by
-`railway-agent`: delete that project and go to C6.
+If the check in step 5 fails only because the volume isn't in `asia-southeast1-eqsg3a`:
+`delete-volume` it (by its id), add it again as in step 3, and repeat step 5. Nothing has deployed
+yet, so nothing is lost.
 
-If a delete fails, don't retry it and don't restart: go to C6 now, and end its message with "Then
-delete the empty `Bullet Bot` project(s) I made just now (none of them has a bot running)."
+If the check in step 1 or 5 fails otherwise, or the volume is still in the wrong region after that
+one retry: `delete-service` the service (by its id), delete any volume left behind, and start again
+at step 1 in the same project. Never migrate it: nobody owns that bot yet, so nothing is lost. If the
+restarted attempt fails too, or a step other than a delete can't be done even by `railway-agent`: go
+to C6.
+
+There may be no tool that deletes a project (`railway-agent` can't either), so never rely on one.
+Whenever you go to C6 after C2 made a project, end its message with "Then delete the empty
+`Bullet Bot` project I made just now (it has no bot running)." If a delete fails, don't retry it and
+don't restart: go to C6 now.
 
 ### C4. Wait for the bot
 
