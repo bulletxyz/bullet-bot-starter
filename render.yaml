@@ -3,7 +3,7 @@ services:
     name: bullet-bot
     runtime: image
     image:
-      url: ghcr.io/bulletxyz/bullet-bots:v55
+      url: ghcr.io/bulletxyz/bullet-bots:latest
     region: singapore
     plan: starter
     numInstances: 1
