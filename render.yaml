@@ -8,9 +8,12 @@ services:
     plan: starter
     numInstances: 1
     healthCheckPath: /health
-    dockerCommand: >-
-      /bin/sh -ec 'export BB__API__HTTP__PUBLIC_HOST="${RENDER_EXTERNAL_HOSTNAME:?}";
-      exec /usr/local/bin/start.sh'
+    envVars:
+      - key: BB__API__HTTP__PUBLIC_HOST
+        fromService:
+          name: bullet-bot
+          type: web
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
     disk:
       name: bot-data
       mountPath: /data
