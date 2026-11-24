@@ -5,30 +5,36 @@ write your own strategies for it.
 
 ## 1. Get your bot
 
-[![Deploy with Claude Code][badge]][deploy]
+### Deploy to Render
 
-[badge]: https://img.shields.io/badge/Deploy%20with-Claude%20Code-D97757?logo=claude&logoColor=white
-[deploy]: https://bulletxyz.github.io/bullet-bot-starter/deploy/
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)][render-deploy]
 
-Use Claude Code, not a regular Claude chat: the button opens it (in the Claude app, the **Code** tab). No message
-filled in? Paste this into Claude Code:
+[render-deploy]: https://render.com/deploy?repo=https://github.com/bulletxyz/bullet-bot-starter
 
-```text
-Deploy and set up my Bullet trading bot for me. Follow this guide: https://raw.githubusercontent.com/bulletxyz/bullet-bot-starter/main/DEPLOY-WITH-CLAUDE.md
-```
+1. **Click Deploy to Render** and approve the paid service. Render starts your bot in Singapore.
+2. **Open Logs** for `bullet-bot` in Render and look for **Open your bot to make it yours**.
+3. **Open that link** and use your Solana wallet to claim your bot.
+4. **Choose Paper trading** to try it without funding it.
 
-You need a Claude plan with Claude Code (Pro or above), a computer, and a Solana wallet with $20+ USDC and a
-little SOL for fees. No wallet yet?
-[Phantom](https://phantom.com/download) takes two minutes.
+Keep the claim link private. Connect Claude from your bot’s page if you want to manage it from chat.
 
-1. **Click Deploy with Claude Code, then send it in Claude Code.** Connect Railway when Claude asks, and say OK. Claude
-   puts your bot on Railway (a free $5 trial, then about $5 a month).
-2. **Open your bot** from Claude's link and make it yours with your wallet. Pick **Paper
-   trading** to try it first.
-3. **Connect to Claude** from your bot's page, and Allow.
+### Or deploy directly on Railway
 
-About three minutes.
-[What Claude does](https://github.com/bulletxyz/bullet-bot-starter/blob/main/DEPLOY-WITH-CLAUDE.md).
+**Set Singapore before you deploy.** The template uses your workspace’s preferred region.
+
+1. **Open [Railway workspace settings](https://railway.com/workspace)** for the workspace you’ll use.
+2. **Set Preferred Deployment Region** to **Southeast Asia (Singapore)** and click **Update Region**.
+3. **Click Deploy to Railway** below and choose that same workspace.
+4. **Verify Singapore** for both the service and its `/data` volume before claiming the bot.
+5. **Open Logs** for `bullet-bot` and look for **Open your bot to make it yours**.
+6. **Open that link** and use your Solana wallet to claim your bot.
+7. **Choose Paper trading** to try it without funding it.
+
+[![Deploy to Railway][railway-badge]][railway-deploy]
+
+[railway-badge]: https://img.shields.io/badge/Deploy%20to-Railway-0B0D0E?logo=railway&logoColor=white
+[railway-deploy]: https://railway.com/deploy/bullet-bot
+
 Rather run it yourself? [Run it with Docker](docs/DEPLOY.md).
 
 ## 2. Trade
