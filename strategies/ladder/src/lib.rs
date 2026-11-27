@@ -9,9 +9,10 @@
 //! (`level.rs`). Built for `wasm32-wasip2` it is a `bb:strategy` component (`just wasm`).
 
 use bb_strategy_sdk::{
-    Decimal, Describe, Descriptor, Event, FromSettings, Intent, Loosening, NewOrder, OrderStatus,
-    OrderType, PaperInputs, Range, ReportField, SettingKind, SettingSpec, Side, StrategyAdapter,
-    StrategyError, StrategyReport, Tier, View,
+    BULLET, Decimal, Describe, Descriptor, Event, ExchangeIntent, ExchangeNeed, FromSettings,
+    Intent, Loosening, MarketEvent, MarketView, NewOrder, OrderStatus, OrderType, PaperInputs,
+    Range, ReportField, SettingKind, SettingSpec, Side, StrategyAdapter, StrategyError,
+    StrategyReport, Tier, View,
 };
 use serde::{Deserialize, Serialize};
 
@@ -115,11 +116,12 @@ impl Ladder {
         })
     }
 
-    /// Feed `ev` to level `at` and turn what it decides into intents.
-    fn run(&mut self, at: usize, ev: Ev<'_>, view: &View<'_>) -> Vec<Intent> {
-        let usable = retry::usable(view.book);
+    /// Feed `ev` to level `at` and turn what it decides into intents on `market`.
+    fn run(&mut self, at: usize, ev: Ev<'_>, view: &View<'_>, market: &MarketView) -> Vec<Intent> {
+        let book = market.book();
+        let usable = retry::usable(book);
         let Some(level) = self.levels.get_mut(at) else { return Vec::new() };
-        let cx = Cx { now_ms: view.now_ms, usable, crosses: level.crosses(view.book) };
+        let cx = Cx { now_ms: view.now_ms, usable, crosses: level.crosses(book) };
         let out = level.apply(ev, cx);
         self.fills = self.fills.saturating_add(u64::from(out.completions));
         if out.venue_cancel {
@@ -129,21 +131,27 @@ impl Ladder {
         out.actions
             .into_iter()
             .map(|action| match action {
-                Action::Place { client_id, qty } => Intent::Place(NewOrder {
-                    protect: None,
-                    symbol: view.symbol.to_owned(),
-                    side,
-                    order_type: self.settings.order_type,
-                    price,
-                    quantity: qty,
-                    client_id: Some(client_id),
-                    reduce_only: false,
-                }),
-                Action::Cancel { client_id } => Intent::Cancel(bb_strategy_sdk::CancelOrder {
-                    symbol: view.symbol.to_owned(),
-                    order_id: String::new(),
-                    client_id: Some(client_id),
-                }),
+                Action::Place { client_id, qty } => Intent::on(
+                    BULLET,
+                    ExchangeIntent::Place(NewOrder {
+                        protect: None,
+                        symbol: market.symbol.clone(),
+                        side,
+                        order_type: self.settings.order_type,
+                        price,
+                        quantity: qty,
+                        client_id: Some(client_id),
+                        reduce_only: false,
+                    }),
+                ),
+                Action::Cancel { client_id } => Intent::on(
+                    BULLET,
+                    ExchangeIntent::Cancel(bb_strategy_sdk::CancelOrder {
+                        symbol: market.symbol.clone(),
+                        order_id: String::new(),
+                        client_id: Some(client_id),
+                    }),
+                ),
             })
             .collect()
     }
@@ -154,33 +162,84 @@ impl Ladder {
         self.levels.iter().position(|l| l.owns(id))
     }
 
-    /// Lay the ladder around the view's usable book, once.
-    fn lay(&mut self, view: &View<'_>) -> Vec<Intent> {
-        if !self.levels.is_empty() || !retry::usable(view.book) {
+    /// Lay the ladder around the market's usable book, once.
+    fn lay(&mut self, view: &View<'_>, market: &MarketView) -> Vec<Intent> {
+        if !self.levels.is_empty() || !retry::usable(market.book()) {
             return Vec::new();
         }
-        let Some(mid) = view.book.and_then(bb_strategy_sdk::OrderBook::midpoint) else {
+        let Some(mid) = market.book().and_then(bb_strategy_sdk::OrderBook::midpoint) else {
             return Vec::new();
         };
         let mid = mid.normalize();
-        let Some(levels) = ladder::levels(mid, &self.settings, view.market.tick_size) else {
+        let Some(levels) = ladder::levels(mid, &self.settings, market.facts.tick_size) else {
             return Vec::new();
         };
         self.levels = levels;
         self.mid = Some(mid);
-        (0..self.levels.len()).flat_map(|at| self.run(at, Ev::Lay, view)).collect()
+        (0..self.levels.len()).flat_map(|at| self.run(at, Ev::Lay, view, market)).collect()
     }
 
     /// Cancels by someone else on a usable book count toward a level's cap, unless several levels
     /// were cancelled together (a sweep).
-    fn settle_cancels(&mut self, view: &View<'_>) {
+    fn settle_cancels(&mut self, view: &View<'_>, market: &MarketView) {
         let pending = std::mem::take(&mut self.pending);
         for (t, at, usable) in &pending {
             let sweep =
                 pending.iter().any(|(t2, a2, _)| a2 != at && t.abs_diff(*t2) <= retry::SWEEP_MS);
             if *usable && !sweep {
-                self.run(*at, Ev::CountCancel, view);
+                self.run(*at, Ev::CountCancel, view, market);
             }
+        }
+    }
+
+    /// `event` in its market: a book, a fill, an order update (a mark changes nothing).
+    fn on_market(
+        &mut self,
+        event: &MarketEvent,
+        view: &View<'_>,
+        market: &MarketView,
+    ) -> Vec<Intent> {
+        match event {
+            MarketEvent::Book => {
+                let mut intents = self.lay(view, market);
+                if intents.is_empty() {
+                    if retry::usable(market.book()) {
+                        self.settle_cancels(view, market);
+                    }
+                    intents = (0..self.levels.len())
+                        .flat_map(|at| self.run(at, Ev::Book, view, market))
+                        .collect();
+                }
+                intents
+            }
+            MarketEvent::Fill(trade) => match self.level_of(trade.client_id.as_deref()) {
+                Some(at) => {
+                    let id = trade.client_id.as_deref().unwrap_or_default();
+                    self.run(at, Ev::Trade { id, qty: trade.quantity }, view, market)
+                }
+                None => Vec::new(),
+            },
+            MarketEvent::Order(order) => {
+                let by = match order.status {
+                    OrderStatus::Cancelled => Some(Ended::Cancelled),
+                    OrderStatus::Rejected => Some(Ended::Rejected),
+                    OrderStatus::Filled => Some(Ended::Filled),
+                    _ => None,
+                };
+                match (by, self.level_of(order.client_id.as_deref())) {
+                    (Some(by), Some(at)) => {
+                        let id = order.client_id.as_deref().unwrap_or_default();
+                        self.run(
+                            at,
+                            Ev::Ended { id, by, filled: order.filled_quantity },
+                            view,
+                            market,
+                        )
+                    }
+                    _ => Vec::new(),
+                }
+            }
+            MarketEvent::Mark(_) => Vec::new(),
         }
     }
 
@@ -234,7 +293,7 @@ impl Describe for Ladder {
                 order_type,
             ],
             settings_schema: schemars::schema_for!(LadderSettings),
-            legs: Vec::new(),
+            exchanges: vec![ExchangeNeed::new(BULLET)],
         }
     }
 }
@@ -252,72 +311,61 @@ impl StrategyAdapter for Ladder {
 
     fn start(&mut self, view: &View<'_>) -> Result<Vec<Intent>, StrategyError> {
         self.last_ms = view.now_ms;
-        Ok(self.lay(view))
+        // One market, so its stop cancels that one, never every market on Bullet.
+        let Some(market) = view.sole_market(BULLET) else {
+            return Err(StrategyError(
+                "ladder: Bullet must show exactly one market to lay it on".into(),
+            ));
+        };
+        Ok(self.lay(view, market))
     }
 
     fn on_event(&mut self, event: &Event, view: &View<'_>) -> Vec<Intent> {
+        // Its one market on Bullet: the host always shows it.
+        let Some(market) = view.sole_market(BULLET) else { return Vec::new() };
         let intents = match event {
-            Event::Book => {
-                let mut intents = self.lay(view);
-                if intents.is_empty() {
-                    if retry::usable(view.book) {
-                        self.settle_cancels(view);
-                    }
-                    intents = (0..self.levels.len())
-                        .flat_map(|at| self.run(at, Ev::Book, view))
-                        .collect();
-                }
-                intents
+            Event::Market { exchange, symbol, event }
+                if exchange == BULLET && *symbol == market.symbol =>
+            {
+                self.on_market(event, view, market)
             }
             // A tick lays the ladder and, with a fresh venue read and its start, settles the levels
             // whose placement has no answer: nothing is placed again or asked again on it.
             Event::Tick => {
-                let intents = self.lay(view);
-                if let (Some(open), Some(started_ms)) = (view.open_orders, view.read_started_ms) {
+                let intents = self.lay(view, market);
+                let bullet = view.exchange(BULLET);
+                let open = bullet.and_then(|e| e.open_orders.as_deref());
+                if let (Some(open), Some(started_ms)) =
+                    (open, bullet.and_then(|e| e.read_started_ms))
+                {
                     for at in 0..self.levels.len() {
-                        self.run(at, Ev::Read { open, started_ms }, view);
+                        self.run(at, Ev::Read { open, started_ms }, view, market);
                     }
                 }
                 intents
             }
-            Event::Fill(trade) => match self.level_of(trade.client_id.as_deref()) {
-                Some(at) => {
-                    let id = trade.client_id.as_deref().unwrap_or_default();
-                    self.run(at, Ev::Trade { id, qty: trade.quantity }, view)
-                }
-                None => Vec::new(),
-            },
-            Event::Order(order) => {
-                let by = match order.status {
-                    OrderStatus::Cancelled => Some(Ended::Cancelled),
-                    OrderStatus::Rejected => Some(Ended::Rejected),
-                    OrderStatus::Filled => Some(Ended::Filled),
-                    _ => None,
-                };
-                match (by, self.level_of(order.client_id.as_deref())) {
-                    (Some(by), Some(at)) => {
-                        let id = order.client_id.as_deref().unwrap_or_default();
-                        self.run(at, Ev::Ended { id, by, filled: order.filled_quantity }, view)
-                    }
-                    _ => Vec::new(),
-                }
-            }
-            Event::Outcome { intent: Intent::Place(order), result } => {
+            Event::Outcome {
+                intent: Intent::On { intent: ExchangeIntent::Place(order), .. },
+                result,
+            } => {
                 let id = order.client_id.as_deref().unwrap_or_default();
                 match self.level_of(Some(id)) {
-                    Some(at) if result.success => self.run(at, Ev::PlaceOk { id }, view),
+                    Some(at) if result.success => self.run(at, Ev::PlaceOk { id }, view, market),
                     Some(at) => {
-                        let crosses = self.levels.get(at).is_some_and(|l| l.crosses(view.book));
+                        let crosses = self.levels.get(at).is_some_and(|l| l.crosses(market.book()));
                         let why = retry::refusal_of(result.error.as_deref(), crosses);
-                        self.run(at, Ev::PlaceRefused { id, why }, view)
+                        self.run(at, Ev::PlaceRefused { id, why }, view, market)
                     }
                     None => Vec::new(),
                 }
             }
-            Event::Outcome { intent: Intent::Cancel(cancel), result } if !result.success => {
+            Event::Outcome {
+                intent: Intent::On { intent: ExchangeIntent::Cancel(cancel), .. },
+                result,
+            } if !result.success => {
                 let id = cancel.client_id.as_deref().unwrap_or_default();
                 match self.level_of(Some(id)) {
-                    Some(at) => self.run(at, Ev::CancelRefused { id }, view),
+                    Some(at) => self.run(at, Ev::CancelRefused { id }, view, market),
                     None => Vec::new(),
                 }
             }
@@ -325,8 +373,7 @@ impl StrategyAdapter for Ladder {
             // or a fresh read settles it (`Level::on_read`).
             Event::Unknown { .. }
             | Event::Outcome { .. }
-            | Event::Mark(_)
-            | Event::Leg { .. }
+            | Event::Market { .. }
             | Event::Answer { .. }
             | Event::Reference(_)
             | Event::Control { .. }
@@ -341,7 +388,8 @@ impl StrategyAdapter for Ladder {
 
     fn stop(&mut self, view: &View<'_>) -> Vec<Intent> {
         self.last_ms = view.now_ms;
-        vec![Intent::CancelAll]
+        let symbol = view.sole_market(BULLET).map(|m| m.symbol.clone());
+        vec![Intent::on(BULLET, ExchangeIntent::CancelAll(symbol))]
     }
 
     fn report(&self) -> LadderReport {

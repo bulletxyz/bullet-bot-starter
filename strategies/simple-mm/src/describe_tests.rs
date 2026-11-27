@@ -1,6 +1,6 @@
 use bb_strategy_sdk::profile::PresetMarket;
 use bb_strategy_sdk::testing::d;
-use bb_strategy_sdk::{Describe, Feed, FromSettings, HostLimit, Needs};
+use bb_strategy_sdk::{BULLET, Describe, ExchangeNeed, Feed, FromSettings, HostLimit, Needs};
 use rust_decimal::Decimal;
 
 use crate::MarketMaker;
@@ -15,7 +15,7 @@ fn the_market_maker_keeps_the_bots_name_and_lists_every_setting() {
     let paths: Vec<_> = d.settings.iter().map(|s| s.path.clone()).collect();
     let want: Vec<_> = crate::settings::settings().into_iter().map(|s| s.path).collect();
     assert_eq!(paths, want);
-    assert!(d.legs.is_empty());
+    assert_eq!(d.exchanges, vec![ExchangeNeed::new(BULLET)]);
 }
 
 #[test]

@@ -40,7 +40,7 @@ fn a_strategy_has_no_profile_unless_it_gives_one() {
                 summary: String::new(),
                 settings: Vec::new(),
                 settings_schema: schemars::Schema::default(),
-                legs: Vec::new(),
+                exchanges: vec![crate::ExchangeNeed::new(crate::BULLET)],
             }
         }
     }
@@ -63,7 +63,7 @@ fn the_owner_page_types_serialize_as_the_bot_reads_them() {
     assert_eq!(json["risk"]["level"], "medium_high");
     assert!(json["featured"][0].get("percent").is_none());
     assert_eq!(json["featured"][1]["percent"], true);
-    let need = ExchangeNeed {
+    let need = ExchangeRole {
         role: "venue",
         setting: Some("exchange"),
         default: "bullet",

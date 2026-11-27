@@ -3,9 +3,10 @@
 
 use std::collections::BTreeMap;
 
+use bb_strategy_sdk::testing::{Market, on_bullet};
 use bb_strategy_sdk::{
-    Event, Intent, MarketFacts, NewOrder, Order, OrderBook, OrderStatus, OrderType, Side,
-    StrategyAdapter, View,
+    BULLET, Event, ExchangeIntent, Intent, MarketEvent, NewOrder, Order, OrderBook, OrderStatus,
+    OrderType, Side, StrategyAdapter,
 };
 use rust_decimal::Decimal;
 use serde_json::json;
@@ -41,47 +42,52 @@ fn config(extra: serde_json::Value) -> AvellanedaStoikovConfig {
 
 const T: u64 = 1_794_398_400_000;
 
-fn view<'a>(
-    book: &'a OrderBook,
-    open: Option<&'a [Order]>,
+/// BTC-USD on Bullet with `book`, flat; `open` the venue's last read, begun at `read_started_ms`.
+fn view(
+    book: &OrderBook,
+    open: Option<&[Order]>,
     now_ms: u64,
     read_started_ms: Option<u64>,
-) -> View<'a> {
-    View {
-        now_ms,
-        symbol: "BTC-USD",
-        book: Some(book),
-        position: Decimal::ZERO,
-        avg_entry: None,
-        realized_pnl: Decimal::ZERO,
-        open_orders: open,
-        positions: open.map(|_| &[][..]),
-        reconnected: false,
-        venue_halt: None,
-        path_stop: None,
-        read_started_ms,
-        limits: None,
-        stop: None,
-        market: MarketFacts::default(),
-        legs: &[],
-    }
+) -> Market {
+    let mut m = Market::new("BTC-USD", "1", "2", now_ms);
+    m.set_book(Some(book.clone()));
+    let bullet = m.bullet_mut().unwrap();
+    bullet.open_orders = open.map(<[Order]>::to_vec);
+    bullet.positions = open.map(|_| Vec::new());
+    bullet.read_started_ms = read_started_ms;
+    m
+}
+
+fn book_event() -> Event {
+    on_bullet("BTC-USD", MarketEvent::Book)
+}
+
+fn place(o: &NewOrder) -> Intent {
+    Intent::on(BULLET, ExchangeIntent::Place(o.clone()))
 }
 
 fn places(intents: &[Intent]) -> Vec<NewOrder> {
     intents
         .iter()
-        .filter_map(|i| if let Intent::Place(o) = i { Some(o.clone()) } else { None })
+        .filter_map(|i| {
+            if let Intent::On { intent: ExchangeIntent::Place(o), .. } = i {
+                Some(o.clone())
+            } else {
+                None
+            }
+        })
         .collect()
 }
 
 /// A started strategy and the four orders its ladder went out with.
 fn quoted() -> (AvellanedaStoikov, Vec<NewOrder>) {
     let mut s = AvellanedaStoikov::new(config(json!({})));
-    s.start(&view(&book("75000", "75010"), None, T, None)).unwrap();
+    s.start(&view(&book("75000", "75010"), None, T, None).view()).unwrap();
     assert!(
-        s.on_event(&Event::Book, &view(&book("75001", "75011"), None, T + 10, None)).is_empty()
+        s.on_event(&book_event(), &view(&book("75001", "75011"), None, T + 10, None).view())
+            .is_empty()
     );
-    let out = s.on_event(&Event::Book, &view(&book("75002", "75012"), None, T + 20, None));
+    let out = s.on_event(&book_event(), &view(&book("75002", "75012"), None, T + 20, None).view());
     let orders = places(&out);
     assert_eq!(orders.len(), 4, "{out:?}");
     (s, orders)
@@ -89,8 +95,11 @@ fn quoted() -> (AvellanedaStoikov, Vec<NewOrder>) {
 
 fn unanswered(s: &mut AvellanedaStoikov, orders: &[NewOrder], now_ms: u64) {
     for o in orders {
-        let event = Event::Unknown { intent: Intent::Place(o.clone()), error: "timeout".into() };
-        assert!(s.on_event(&event, &view(&book("75002", "75012"), None, now_ms, None)).is_empty());
+        let event = Event::Unknown { intent: place(o), error: "timeout".into() };
+        assert!(
+            s.on_event(&event, &view(&book("75002", "75012"), None, now_ms, None).view())
+                .is_empty()
+        );
     }
 }
 
@@ -118,7 +127,8 @@ fn an_unanswered_place_is_held_and_not_placed_again() {
     unanswered(&mut s, &orders, T + 30);
     assert_eq!(s.report().slots.len(), 4, "the four levels are held");
     // The next book finds every level taken: nothing to place.
-    let again = s.on_event(&Event::Book, &view(&book("75003", "75013"), None, T + 40, None));
+    let again =
+        s.on_event(&book_event(), &view(&book("75003", "75013"), None, T + 40, None).view());
     assert!(places(&again).is_empty(), "placed again: {again:?}");
 }
 
@@ -126,11 +136,12 @@ fn an_unanswered_place_is_held_and_not_placed_again() {
 fn a_place_the_host_failed_to_send_is_placed_again() {
     let (mut s, orders) = quoted();
     for o in &orders {
-        let event = Event::Failed { intent: Intent::Place(o.clone()), error: "not sent".into() };
-        s.on_event(&event, &view(&book("75002", "75012"), None, T + 30, None));
+        let event = Event::Failed { intent: place(o), error: "not sent".into() };
+        s.on_event(&event, &view(&book("75002", "75012"), None, T + 30, None).view());
     }
     assert!(s.report().slots.is_empty());
-    let again = s.on_event(&Event::Book, &view(&book("75003", "75013"), None, T + 40, None));
+    let again =
+        s.on_event(&book_event(), &view(&book("75003", "75013"), None, T + 40, None).view());
     assert_eq!(places(&again).len(), 4, "{again:?}");
 }
 
@@ -141,9 +152,10 @@ fn a_read_that_lists_a_held_order_adopts_it() {
     let listed: Vec<Order> =
         orders.iter().enumerate().map(|(i, o)| resting(o, &format!("oid-{i}"))).collect();
     let b = book("75002", "75012");
-    s.on_event(&Event::Tick, &view(&b, Some(&listed), T + 500, Some(T + 500)));
+    s.on_event(&Event::Tick, &view(&b, Some(&listed), T + 500, Some(T + 500)).view());
     assert_eq!(slots_with_ids(&s), [true; 4], "each took its venue id");
-    let again = s.on_event(&Event::Book, &view(&book("75003", "75013"), None, T + 600, None));
+    let again =
+        s.on_event(&book_event(), &view(&book("75003", "75013"), None, T + 600, None).view());
     assert!(places(&again).is_empty(), "{again:?}");
 }
 
@@ -156,7 +168,7 @@ fn a_read_after_the_settle_margin_that_omits_it_frees_the_level() {
         orders[1..].iter().enumerate().map(|(i, o)| resting(o, &format!("oid-{i}"))).collect();
     let b = book("75002", "75012");
     // The tick that frees it requotes the level at once.
-    let out = s.on_event(&Event::Tick, &view(&b, Some(&listed), T + 2_600, Some(T + 2_500)));
+    let out = s.on_event(&Event::Tick, &view(&b, Some(&listed), T + 2_600, Some(T + 2_500)).view());
     let again = places(&out);
     assert_eq!(again.len(), 1, "only the freed level is placed again: {out:?}");
     assert_eq!((again[0].side, again[0].price.round_dp(0)), (Side::Buy, d("74969")));
@@ -170,9 +182,10 @@ fn a_read_just_after_the_unknown_place_does_not_free_it() {
     // The venue's list can lag: a read that began within the margin omitting the order proves
     // nothing.
     let b = book("75002", "75012");
-    s.on_event(&Event::Tick, &view(&b, Some(&[]), T + 600, Some(T + 500)));
+    s.on_event(&Event::Tick, &view(&b, Some(&[]), T + 600, Some(T + 500)).view());
     assert_eq!(s.report().slots.len(), 4);
-    let again = s.on_event(&Event::Book, &view(&book("75003", "75013"), None, T + 700, None));
+    let again =
+        s.on_event(&book_event(), &view(&book("75003", "75013"), None, T + 700, None).view());
     assert!(places(&again).is_empty(), "{again:?}");
 }
 
@@ -196,17 +209,21 @@ fn an_unanswered_amend_holds_both_the_old_quote_and_the_new_one() {
             error: None,
         };
         s.on_event(
-            &Event::Outcome { intent: Intent::Place(o.clone()), result },
-            &view(&b, None, T + 30, None),
+            &Event::Outcome { intent: place(o), result },
+            &view(&b, None, T + 30, None).view(),
         );
     }
     // The market moves: every rung is amended, and the first amend's call times out.
     let moved = book("75100", "75110");
-    let out = s.on_event(&Event::Book, &view(&moved, None, T + 100, None));
-    let amends: Vec<_> = out.iter().filter(|i| matches!(i, Intent::Amend(_))).cloned().collect();
+    let out = s.on_event(&book_event(), &view(&moved, None, T + 100, None).view());
+    let amends: Vec<_> = out
+        .iter()
+        .filter(|i| matches!(i, Intent::On { intent: ExchangeIntent::Amend(_), .. }))
+        .cloned()
+        .collect();
     assert_eq!(amends.len(), 4, "{out:?}");
     let event = Event::Unknown { intent: amends[0].clone(), error: "timeout".into() };
-    s.on_event(&event, &view(&moved, None, T + 110, None));
+    s.on_event(&event, &view(&moved, None, T + 110, None).view());
     assert_eq!(
         s.report().slots.len(),
         1 + 1,

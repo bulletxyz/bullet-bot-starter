@@ -1,4 +1,4 @@
-use bb_strategy_sdk::{Describe, FromSettings};
+use bb_strategy_sdk::{BULLET, Describe, ExchangeNeed, FromSettings};
 
 use crate::RsiMomentum;
 
@@ -10,7 +10,7 @@ fn rsi_momentum_is_named_for_its_folder_and_lists_every_setting() {
     let paths: Vec<_> = d.settings.iter().map(|s| s.path.clone()).collect();
     let want: Vec<_> = crate::settings().into_iter().map(|s| s.path).collect();
     assert_eq!(paths, want);
-    assert!(d.legs.is_empty());
+    assert_eq!(d.exchanges, vec![ExchangeNeed::new(BULLET)]);
 }
 
 #[test]

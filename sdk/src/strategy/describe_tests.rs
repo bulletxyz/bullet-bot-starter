@@ -67,7 +67,7 @@ fn a_strategy_needs_only_the_resync_unless_it_says_more() {
                 summary: String::new(),
                 settings: Vec::new(),
                 settings_schema: schemars::Schema::default(),
-                legs: Vec::new(),
+                exchanges: vec![ExchangeNeed::new(BULLET)],
             }
         }
     }
@@ -75,4 +75,30 @@ fn a_strategy_needs_only_the_resync_unless_it_says_more() {
     assert_eq!(needs, Needs::default());
     assert!(needs.feeds.is_empty() && !needs.flatten_on_wind_down);
     assert_eq!(needs.resync, Some(DEFAULT_RESYNC_TICKS));
+    assert_eq!(Bare::describe().check(), Ok(()));
+}
+
+/// The host runs only a strategy that trades Bullet, each venue named once.
+#[test]
+fn a_descriptor_must_trade_bullet_and_name_each_venue_once() {
+    let cases: [(&[&str], Option<&str>); 5] = [
+        (&[BULLET], None),
+        (&["hyperliquid", BULLET], None),
+        (&[], Some("must list it")),
+        (&["hyperliquid"], Some("must list it")),
+        (&[BULLET, "hyperliquid", BULLET], Some("bullet is listed twice")),
+    ];
+    for (venues, refused) in cases {
+        let descriptor = Descriptor {
+            summary: String::new(),
+            settings: Vec::new(),
+            settings_schema: schemars::Schema::default(),
+            exchanges: venues.iter().map(|v| ExchangeNeed::new(v)).collect(),
+        };
+        match (descriptor.check(), refused) {
+            (Ok(()), None) => {}
+            (Err(why), Some(want)) => assert!(why.contains(want), "{venues:?}: {why}"),
+            (got, want) => panic!("{venues:?}: {got:?}, wanted refusal {want:?}"),
+        }
+    }
 }

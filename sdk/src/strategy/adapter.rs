@@ -14,13 +14,11 @@ use crate::history::candles::{HistoryNeed, Warmup};
 use crate::host::calls::{Answer, CallError, VenueCall};
 use crate::host::capability::{Alert, CloseReport, LimitsUpdate, Persist, ReferencePrice};
 use crate::host::control::{ControlCmd, ControlReply};
-use crate::host::legs::LegView;
+use crate::host::exchanges::{ExchangeView, MarketView};
 use crate::stops::StopReason;
 use crate::strategy::twin::{TwinAdapter, TwinSpec};
 use crate::targets::Target;
-use crate::types::{
-    AmendOrder, CancelOrder, NewOrder, Order, OrderBook, OrderResult, Position, Protection, Trade,
-};
+use crate::types::{AmendOrder, CancelOrder, NewOrder, Order, OrderResult, Protection, Trade};
 
 pub use crate::strategy::report::{FieldValue, PaperInputs, ReportField, StrategyReport};
 
@@ -93,7 +91,8 @@ pub trait StrategyAdapter: Send + 'static {
     /// so a failed cancel leaves the quotes showing.
     fn orders_cancelled(&mut self) {}
 
-    /// Whether this tick needs a fresh read of the venue (`View::open_orders`, `View::positions`).
+    /// Whether this tick needs a fresh read of the venues (each exchange's `open_orders` and
+    /// `positions`).
     /// The host reads at a tick only when this says so, the order path has a fill or cancel
     /// waiting for a read that follows it, or the venue stream reconnected (`reconnected`); a
     /// tick without a read makes no REST call and its view carries no venue lists. The default is
@@ -238,48 +237,39 @@ pub trait FromSettings: Sized {
 pub struct View<'a> {
     /// The bot's clock, Unix milliseconds; a strategy never reads the wall clock.
     pub now_ms: u64,
-    pub symbol: &'a str,
-    pub book: Option<&'a OrderBook>,
-    /// The host's inventory from fills, seeded from the venue position at start.
-    pub position: Decimal,
-    pub avg_entry: Option<Decimal>,
-    pub realized_pnl: Decimal,
-    /// The strategy's orders resting on the venue, from the venue read the host just made: `Some`
-    /// only for the view `start` gets and for a tick's first round when its read succeeded. `None`
-    /// for every other view (a fill, an order update, a book, an outcome, a later round, `stop`)
-    /// and when a tick's read failed: the list is then unknown or stale, so a strategy must not
-    /// treat a level as gone.
-    pub open_orders: Option<&'a [Order]>,
-    /// The venue's positions from the same read as `open_orders`, with the same freshness: `Some`
-    /// only for the view `start` gets and for a tick's first round when its read succeeded, `None`
-    /// otherwise. A strategy sizes its closes and reconciles its inventory on this
-    /// ([`crate::signed_position`]); it never reads the venue.
-    pub positions: Option<&'a [Position]>,
-    /// The venue stream reconnected since the strategy last saw a tick: events may have been
-    /// missed, so a strategy that tracks orders or inventory reconciles them against `open_orders`
-    /// and `positions` now. True on one tick's view, then false.
-    pub reconnected: bool,
-    /// The venue refuses orders (why), e.g. a stale oracle on its side. A strategy stops quoting,
-    /// as it would under a stop of its own, until this is `None` again.
-    pub venue_halt: Option<&'a str>,
-    pub market: MarketFacts,
-    /// The host's other legs (the strategy's [`LegNeed`](crate::LegNeed)s): each one's venue,
-    /// declared symbols, books, marks and the positions its last read found (`None`: unread,
-    /// never flat). Empty for a strategy on one symbol.
-    pub legs: &'a [LegView],
-    /// The host's own order path refuses new orders (why): its stop, not the venue's. Refusals it
-    /// causes are not rejections by the venue, so a strategy's reject breaker must not count them.
-    pub path_stop: Option<&'a str>,
-    /// When the venue read behind `open_orders` and `positions` started (the bot clock, ms);
-    /// `None` with no fresh read. A strategy that decides on what a read omits compares it with
-    /// when the thing it asks about was sent, not with when the read reached it.
-    pub read_started_ms: Option<u64>,
+    /// Every exchange the strategy declared ([`ExchangeNeed`](crate::ExchangeNeed)), one per venue;
+    /// [`BULLET`](crate::BULLET) is always one of them.
+    pub exchanges: &'a [ExchangeView],
     /// The hard limits the host holds the order path to (native only; `None` for a plugin), live:
     /// a paper run leaves it `None`, so a paper cap nobody chose refuses no plan.
     pub limits: Option<LimitsInForce>,
     /// The host's own stop, typed (native only; `None` for a plugin): what `path_stop` says in
     /// words, so a strategy can tell a daily loss stop from a pause.
     pub stop: Option<&'a StopReason>,
+}
+
+impl View<'_> {
+    /// The exchange on `venue`, when the strategy declared it.
+    #[must_use]
+    pub fn exchange(&self, venue: &str) -> Option<&ExchangeView> {
+        self.exchanges.iter().find(|e| e.venue == venue)
+    }
+
+    /// The market `symbol` on `venue`, when the strategy declared it.
+    #[must_use]
+    pub fn market(&self, venue: &str, symbol: &str) -> Option<&MarketView> {
+        self.exchange(venue).and_then(|e| e.market(symbol))
+    }
+
+    /// The one market declared on `venue`: what a strategy on one market with no symbol setting
+    /// trades (the host gives it exactly that market). `None` unless there is exactly one.
+    #[must_use]
+    pub fn sole_market(&self, venue: &str) -> Option<&MarketView> {
+        match self.exchange(venue)?.markets.as_slice() {
+            [market] => Some(market),
+            _ => None,
+        }
+    }
 }
 
 /// The venue's facts about the market, when it reports them.
@@ -319,13 +309,13 @@ impl LimitsInForce {
 /// case.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Event {
-    /// The book changed; the book itself is in the [`View`].
-    Book,
-    /// The venue's mark price for the host's symbol, on its own venue (a strategy that works on the
-    /// mark, not the book).
-    Mark(Decimal),
-    Fill(Trade),
-    Order(Order),
+    /// `event` in the market `symbol` on `exchange`; its book, mark and position are in
+    /// [`View::exchanges`].
+    Market {
+        exchange: String,
+        symbol: String,
+        event: MarketEvent,
+    },
     Tick,
     /// What the venue (or the gate) answered for one intent the strategy returned, matched by
     /// client id: a place, an amend or a cancel.
@@ -370,20 +360,13 @@ pub enum Event {
         intent: Intent,
         error: String,
     },
-    /// `event` (a book, a mark, a fill, an order update) for `symbol` on the leg `leg`; the leg's
-    /// books, marks and positions are in [`View::legs`].
-    Leg {
-        leg: String,
-        symbol: String,
-        event: Box<Event>,
-    },
     /// The answer to the [`Intent::Request`] with this `id`: exactly one per request.
     Answer {
         id: u64,
         reply: Result<Answer, CallError>,
     },
     /// The funding executor's market view for this decision tick (signals, costs, marks, open
-    /// interest, each venue's legs, equity, the knobs the strategy decides within). Answer it with
+    /// interest, the position on each exchange, equity, the knobs the strategy decides within). Answer it with
     /// [`Intent::Targets`]. Only a host that owns a funding executor delivers it.
     MarketView(crate::targets::MarketView),
 }
@@ -394,13 +377,9 @@ impl Event {
     #[must_use]
     pub fn kind(&self) -> &'static str {
         match self {
-            Self::Book => "book",
-            Self::Mark(_) => "mark",
-            Self::Fill(_) => "trade",
-            Self::Order(_) => "lifecycle",
+            Self::Market { event, .. } => event.kind(),
             Self::Tick => "tick",
             Self::Reference(_) => "reference",
-            Self::Leg { event, .. } => event.kind(),
             Self::Control { .. } => "control",
             Self::Persisted { .. } => "persisted",
             Self::Outcome { .. }
@@ -413,21 +392,39 @@ impl Event {
     }
 }
 
+/// Something in one market ([`Event::Market`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MarketEvent {
+    /// The book changed; the book itself is in the [`View`].
+    Book,
+    /// The venue's mark price (a strategy that works on the mark, not the book).
+    Mark(Decimal),
+    Fill(Trade),
+    Order(Order),
+}
+
+impl MarketEvent {
+    /// See [`Event::kind`].
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Book => "book",
+            Self::Mark(_) => "mark",
+            Self::Fill(_) => "trade",
+            Self::Order(_) => "lifecycle",
+        }
+    }
+}
+
 /// What a strategy asks the host to do (exhaustive, see [`Event`]). Every order passes the host's gate. A plugin
 /// faults on `Reply`, `Persist`, `ClosePosition`, `SetLimits`, `StandDown` or `Targets`; its `CancelOwn` crosses as
 /// `CancelAll` (its own orders only) and its `Notify` is dropped.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Intent {
-    Place(NewOrder),
-    Cancel(CancelOrder),
-    /// Cancel every order on the market, the owner's too: a safety stop's pull. On a leg, and in a
-    /// normal wind-down's stop round, it takes only the bot's own orders.
-    CancelAll,
-    /// Cancel only the bot's own orders on the market (those with its marked client id, and those
-    /// its path sent): the owner's orders there stay. Live, when the orders can't be listed or its
-    /// own can't all be cancelled, every order goes.
-    CancelOwn,
-    Amend(AmendOrder),
+    /// `intent` on the exchange `exchange` (a venue the strategy declared): its symbols are checked
+    /// against that exchange's markets, and it passes that exchange's order path and limits. An
+    /// unknown exchange or symbol is refused.
+    On { exchange: String, intent: ExchangeIntent },
     /// Stop the bot, with the reason (e.g. a config that can't run).
     Shutdown(String),
     /// Hold the instance for safety, with the reason: the supervisor's safety hold, kept through
@@ -436,57 +433,61 @@ pub enum Intent {
     StandDown(String),
     /// Answer the command [`Event::Control`] delivered under `id`. The host sends the reply to the
     /// caller; an id it does not know (already answered) is ignored.
-    Reply {
-        id: u64,
-        reply: ControlReply,
-    },
+    Reply { id: u64, reply: ControlReply },
     /// Write to the bot's state: see [`Persist`]. Carried out before any order of the round; an
     /// acked write holds the rest of the round until it is applied.
     Persist(Persist),
     /// Tell the owner: see [`Alert`]. Lossy by design: a notifier that is full drops it.
     Notify(Alert),
-    /// Close the position now with reduce-only IOCs, and answer with [`Event::Closed`] under `id`.
-    /// The host cancels every order on the symbol, reads the venue's position, and sends up to
-    /// `CLOSE_ATTEMPTS` IOCs at the touch, never more than `CLOSE_MAX_SLIPPAGE_BPS` from mid, each
-    /// sized to the position left and through the order path's reduce-only check. Closes only
-    /// shrink the position, so this passes a halted path. A strategy that wants to stop quoting
-    /// first asks for that (and persists its pause) in an earlier round.
-    ClosePosition {
-        id: u64,
-    },
+    /// Close the position in `symbol` on `exchange` now with reduce-only IOCs, and answer with
+    /// [`Event::Closed`] under `id`. The host cancels every order on the symbol, reads the venue's
+    /// position, and sends up to `CLOSE_ATTEMPTS` IOCs at the touch, never more than
+    /// `CLOSE_MAX_SLIPPAGE_BPS` from mid, each sized to the position left and through the order
+    /// path's reduce-only check. Closes only shrink the position, so this passes a halted path. A
+    /// strategy that wants to stop quoting first asks for that (and persists its pause) in an
+    /// earlier round.
+    ClosePosition { id: u64, exchange: String, symbol: String },
     /// The strategy tightened its hard limits live: the host tightens the order path's gate and the
     /// snapshot's limits to match. Only a tighter value is applied; a looser one is ignored.
     SetLimits(LimitsUpdate),
-    /// `intent` on the leg `leg` (one the strategy declared, [`TRADE_LEG`](crate::TRADE_LEG) for
-    /// the one the host was built over): its symbols are checked against that leg's, and it passes
-    /// that leg's order path and limits. Only orders, cancels, a cancel all, a flatten and a
-    /// shutdown go on a leg; an unknown leg, a leg inside a leg, or anything else is refused.
-    Leg {
-        leg: String,
-        intent: Box<Intent>,
-    },
-    /// Close the venue's positions in `symbols` (of the leg it is sent on) with the host's bounded
-    /// close (`Intent::ClosePosition`'s), each read again after: its outcome succeeds only when
-    /// every one reads flat. It only lowers risk. On the trade leg of an account the owner shares
-    /// (Bullet's main account) it is refused: part of that position may be the owner's.
-    Flatten {
-        symbols: Vec<String>,
-    },
-    /// A venue call on leg `leg` ([`TRADE_LEG`](crate::TRADE_LEG) for the host's own), carried out
-    /// by the host as its own work between events (never in this event's rounds, never over its
-    /// budget), bounded by a deadline, and answered once by an [`Event::Answer`] with the same
-    /// `id`. Writes pass the leg's order path. The strategy picks the ids; one in flight is never
-    /// reused.
-    Request {
-        id: u64,
-        leg: String,
-        call: VenueCall,
-    },
+    /// A venue call on the exchange `exchange`, carried out by the host as its own work between
+    /// events (never in this event's rounds, never over its budget), bounded by a deadline, and
+    /// answered once by an [`Event::Answer`] with the same `id`. Writes pass the exchange's order
+    /// path. The strategy picks the ids; one in flight is never reused.
+    Request { id: u64, exchange: String, call: VenueCall },
     /// Hedged target positions, one per symbol: what a funding strategy wants held across its two
     /// venues. The host hands them to the bot's executor, which clamps each to its caps and turns
     /// it into hedged orders; a strategy returning them places no order itself. A symbol left out
     /// is read as target 0.
     Targets(Vec<Target>),
+}
+
+impl Intent {
+    /// `intent` on the exchange `exchange`.
+    #[must_use]
+    pub fn on(exchange: &str, intent: ExchangeIntent) -> Self {
+        Self::On { exchange: exchange.into(), intent }
+    }
+}
+
+/// An intent on one exchange ([`Intent::On`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ExchangeIntent {
+    Place(NewOrder),
+    Cancel(CancelOrder),
+    /// Cancel every order on `symbol` (every market of the exchange when `None`), the owner's too: a
+    /// safety stop's pull. In a normal wind-down's stop round it takes only the bot's own orders.
+    CancelAll(Option<String>),
+    /// Cancel only the bot's own orders on `symbol` (every market of the exchange when `None`):
+    /// those with its marked client id, and those its path sent; the owner's orders there stay.
+    /// Live, when the orders can't be listed or its own can't all be cancelled, every order goes.
+    CancelOwn(Option<String>),
+    Amend(AmendOrder),
+    /// Close the venue's positions in these symbols with the host's bounded close
+    /// (`Intent::ClosePosition`'s), each read again after: its outcome succeeds only when every
+    /// one reads flat. It only lowers risk. On an account the owner shares (Bullet's main account)
+    /// it is refused: part of that position may be the owner's.
+    Flatten(Vec<String>),
 }
 
 /// A strategy could not run.

@@ -6,9 +6,10 @@ use rust_decimal::Decimal;
 
 use super::*;
 use crate::host::calls::{Answer, CallError, ReadQuery, VenueCall};
-use crate::host::legs::LegView;
+use crate::host::exchanges::{BULLET, ExchangeView, MarketView};
 use crate::strategy::adapter::{
-    Event, FieldValue, Intent, MarketFacts, PaperInputs, ReportField, View,
+    Event, ExchangeIntent, FieldValue, Intent, MarketEvent, MarketFacts, PaperInputs, ReportField,
+    View,
 };
 use crate::types::{
     AccountEquity, AmendOrder, CancelOrder, CancelResult, FundingSample, NewOrder, Order,
@@ -95,39 +96,45 @@ impl StrategyAdapter for Echo {
 
     fn start(&mut self, view: &View<'_>) -> Result<Vec<Intent>, StrategyError> {
         note(format!("start {view:?}"));
-        Ok(vec![Intent::CancelAll])
+        Ok(vec![Intent::on(BULLET, ExchangeIntent::CancelAll(None))])
     }
 
     fn on_event(&mut self, event: &Event, view: &View<'_>) -> Vec<Intent> {
         note(format!("{event:?}"));
         note(format!("{view:?}"));
         self.ticks = self.ticks.saturating_add(1);
-        let cancel =
-            CancelOrder { symbol: "BTC-USD".into(), order_id: "9".into(), client_id: None };
-        vec![
-            Intent::Place(order("76.125", "a")),
-            Intent::Cancel(cancel.clone()),
-            Intent::Amend(AmendOrder { cancel, new_order: order("-1.5", "b") }),
-            Intent::Shutdown("done".into()),
-            Intent::Leg { leg: "hedge".into(), intent: Box::new(Intent::Place(order("2", "h"))) },
-            Intent::Flatten { symbols: vec!["ETH".into()] },
-            Intent::Request {
-                id: 7,
-                leg: "trade".into(),
-                call: VenueCall::Read(ReadQuery::OpenOrders { symbol: "BTC-USD".into() }),
-            },
-            // A shutdown on a leg crosses as a plain shutdown, as the native host lifts it.
-            Intent::Leg { leg: "hedge".into(), intent: Box::new(Intent::Shutdown("x".into())) },
-        ]
+        sent()
     }
 
     fn stop(&mut self, _view: &View<'_>) -> Vec<Intent> {
-        vec![Intent::CancelAll]
+        vec![Intent::on(BULLET, ExchangeIntent::CancelAll(None))]
     }
 
     fn report(&self) -> EchoReport {
         EchoReport { ticks: self.ticks }
     }
+}
+
+/// What the echo strategy answers every event with: one intent of each kind the world carries.
+fn sent() -> Vec<Intent> {
+    let cancel = CancelOrder { symbol: "BTC-USD".into(), order_id: "9".into(), client_id: None };
+    vec![
+        Intent::on(BULLET, ExchangeIntent::Place(order("76.125", "a"))),
+        Intent::on(BULLET, ExchangeIntent::Cancel(cancel.clone())),
+        Intent::on(
+            BULLET,
+            ExchangeIntent::Amend(AmendOrder { cancel, new_order: order("-1.5", "b") }),
+        ),
+        Intent::Shutdown("done".into()),
+        Intent::on("hyperliquid", ExchangeIntent::Place(order("2", "h"))),
+        Intent::on("hyperliquid", ExchangeIntent::Flatten(vec!["ETH".into()])),
+        Intent::on(BULLET, ExchangeIntent::CancelAll(Some("ETH-USD".into()))),
+        Intent::Request {
+            id: 7,
+            exchange: BULLET.into(),
+            call: VenueCall::Read(ReadQuery::OpenOrders { symbol: "BTC-USD".into() }),
+        },
+    ]
 }
 
 fn book() -> OrderBook {
@@ -152,17 +159,49 @@ fn resting() -> Vec<Order> {
     }]
 }
 
-fn hedge() -> LegView {
-    let mut leg = LegView::new("hedge", "hyperliquid", vec!["ETH".into()]);
-    leg.books.insert("ETH".into(), std::sync::Arc::new(book()));
-    leg.book_at_ms.insert("ETH".into(), 1_794_398_399_000);
-    leg.marks.insert("ETH".into(), d("2500.5"));
-    leg.funding_rates.insert("ETH".into(), d("0.0001"));
-    leg.reconnected = true;
-    leg.positions = Some(vec![position()]);
-    leg.market
-        .insert("ETH".into(), MarketFacts { tick_size: Some(d("0.01")), ..MarketFacts::default() });
-    leg
+/// Two Bullet markets, one with every field set and one bare, and a second exchange.
+fn exchanges() -> [ExchangeView; 2] {
+    let btc = MarketView {
+        symbol: "BTC-USD".into(),
+        book: Some(std::sync::Arc::new(book())),
+        book_at_ms: Some(1_794_398_399_000),
+        mark: Some(d("75.25")),
+        funding_rate: Some(d("-0.0002")),
+        facts: MarketFacts {
+            tick_size: Some(d("0.1")),
+            step_size: None,
+            maker_fee_bps: Some(d("-0.5")),
+            taker_fee_bps: Some(d("4.5")),
+            fee_tier: Some(3),
+            venue_name: Some("Bullet".into()),
+        },
+        position: d("-0.75"),
+        avg_entry: Some(d("75.25")),
+        realized_pnl: d("-12.5"),
+    };
+    let bullet = ExchangeView {
+        open_orders: Some(resting()),
+        positions: None,
+        reconnected: true,
+        venue_halt: Some("stale oracle".into()),
+        path_stop: Some("daily loss".into()),
+        read_started_ms: Some(1_794_398_399_900),
+        ..ExchangeView::new(BULLET, vec![btc, MarketView::new("ETH-USD")])
+    };
+    let eth = MarketView {
+        book: Some(std::sync::Arc::new(book())),
+        book_at_ms: Some(1_794_398_399_000),
+        mark: Some(d("2500.5")),
+        funding_rate: Some(d("0.0001")),
+        facts: MarketFacts { tick_size: Some(d("0.01")), ..MarketFacts::default() },
+        ..MarketView::new("ETH")
+    };
+    let hyperliquid = ExchangeView {
+        reconnected: true,
+        positions: Some(vec![position()]),
+        ..ExchangeView::new("hyperliquid", vec![eth])
+    };
+    [bullet, hyperliquid]
 }
 
 fn position() -> Position {
@@ -175,51 +214,32 @@ fn position() -> Position {
     }
 }
 
-fn view<'a>(book: &'a OrderBook, orders: &'a [Order], legs: &'a [LegView]) -> View<'a> {
-    View {
-        now_ms: 1_794_398_400_000,
-        symbol: "BTC-USD",
-        book: Some(book),
-        positions: None,
-        reconnected: true,
-        venue_halt: Some("stale oracle"),
-        legs,
-        path_stop: Some("daily loss"),
-        read_started_ms: Some(1_794_398_399_900),
-        limits: None,
-        stop: None,
-        position: d("-0.75"),
-        avg_entry: Some(d("75.25")),
-        realized_pnl: d("-12.5"),
-        open_orders: Some(orders),
-        market: MarketFacts {
-            tick_size: Some(d("0.1")),
-            step_size: None,
-            maker_fee_bps: Some(d("-0.5")),
-            taker_fee_bps: Some(d("4.5")),
-            fee_tier: Some(3),
-            venue_name: Some("Bullet".into()),
-        },
-    }
+fn view(exchanges: &[ExchangeView]) -> View<'_> {
+    View { now_ms: 1_794_398_400_000, exchanges, limits: None, stop: None }
 }
 
 /// One test: the strategy is a thread-local, so the calls run in order on one thread.
 #[test]
 fn every_call_crosses_the_wire_and_back_unchanged() {
-    assert_eq!(
-        start(&wire::host::view(&view(&book(), &[], &[]))).err().as_deref(),
-        Some(NOT_STARTED)
-    );
+    assert_eq!(start(&wire::host::view(&view(&[]))).err().as_deref(), Some(NOT_STARTED));
     assert_eq!(init::<Echo>("refuse"), Err("echo: refused".into()));
     init::<Echo>("{}").unwrap();
 
-    let (book, orders, legs) = (book(), resting(), [hedge()]);
-    let sent = view(&book, &orders, &legs);
-    let started = start(&wire::host::view(&sent)).unwrap();
-    assert!(matches!(started[..], [w::Intent::CancelAll]));
-    assert_eq!(SEEN.lock().unwrap().pop(), Some(format!("start {sent:?}")), "the view as sent");
+    let exchanges = exchanges();
+    let shown = view(&exchanges);
+    assert_eq!(shown.market(BULLET, "ETH-USD"), Some(&MarketView::new("ETH-USD")));
+    assert_eq!(shown.exchange("hyperliquid").unwrap().venue_position("ETH"), Some(d("-1.5")));
+    let started = start(&wire::host::view(&shown)).unwrap();
+    let all = wire::intent_from_wire(started.into_iter().next().unwrap()).unwrap();
+    assert_eq!(all, Intent::on(BULLET, ExchangeIntent::CancelAll(None)));
+    assert_eq!(SEEN.lock().unwrap().pop(), Some(format!("start {shown:?}")), "the view as sent");
 
-    let fill = Event::Fill(Trade {
+    let on_bullet = |symbol: &str, event| Event::Market {
+        exchange: BULLET.into(),
+        symbol: symbol.into(),
+        event,
+    };
+    let fill = MarketEvent::Fill(Trade {
         exchange: "bullet".into(),
         symbol: "BTC-USD".into(),
         order_id: "9".into(),
@@ -231,7 +251,7 @@ fn every_call_crosses_the_wire_and_back_unchanged() {
         timestamp: Some(1_794_398_400_123),
     });
     let refused = Event::Outcome {
-        intent: Intent::Place(order("76.125", "a")),
+        intent: Intent::on(BULLET, ExchangeIntent::Place(order("76.125", "a"))),
         result: OrderResult {
             order_id: None,
             client_id: Some("a".into()),
@@ -239,35 +259,21 @@ fn every_call_crosses_the_wire_and_back_unchanged() {
             error: Some("risk gate".into()),
         },
     };
-    let order_event = Event::Order(resting().remove(0));
-    for event in [Event::Tick, Event::Book, Event::Mark(d("75.25")), fill, refused, order_event]
-        .into_iter()
-        .chain(new_events())
-    {
-        let intents = on_event(wire::host::event(&event).unwrap(), &wire::host::view(&sent));
+    let events = [
+        Event::Tick,
+        on_bullet("BTC-USD", MarketEvent::Book),
+        on_bullet("ETH-USD", MarketEvent::Mark(d("75.25"))),
+        on_bullet("BTC-USD", fill),
+        refused,
+        on_bullet("BTC-USD", MarketEvent::Order(resting().remove(0))),
+    ];
+    for event in events.into_iter().chain(new_events()) {
+        let intents = on_event(wire::host::event(&event).unwrap(), &wire::host::view(&shown));
         let back: Vec<Intent> =
             intents.into_iter().map(|i| wire::intent_from_wire(i).unwrap()).collect();
-        assert_eq!(back[0], Intent::Place(order("76.125", "a")));
-        assert_eq!(
-            back[1],
-            Intent::Cancel(CancelOrder {
-                symbol: "BTC-USD".into(),
-                order_id: "9".into(),
-                client_id: None
-            })
-        );
-        assert!(matches!(&back[2], Intent::Amend(a) if a.new_order.price == d("-1.5")));
-        assert_eq!(back[3], Intent::Shutdown("done".into()));
-        assert_eq!(
-            back[4],
-            Intent::Leg { leg: "hedge".into(), intent: Box::new(Intent::Place(order("2", "h"))) }
-        );
-        assert_eq!(back[5], Intent::Flatten { symbols: vec!["ETH".into()] });
-        assert!(matches!(&back[6], Intent::Request { id: 7, .. }));
-        assert_eq!(back.len(), 8, "a shutdown on a leg crosses as a plain one, never dropped");
-        assert_eq!(back[7], Intent::Shutdown("x".into()));
+        assert_eq!(back, sent(), "every intent as the strategy gave it, in order");
         let mut seen = SEEN.lock().unwrap();
-        assert_eq!(seen.pop(), Some(format!("{sent:?}")));
+        assert_eq!(seen.pop(), Some(format!("{shown:?}")));
         assert_eq!(seen.pop(), Some(format!("{event:?}")), "the event as sent");
     }
 
@@ -296,7 +302,9 @@ fn every_call_crosses_the_wire_and_back_unchanged() {
     assert_eq!(wire::undec(inputs.maker_fee_bps).unwrap(), d("-0.5"));
     assert_eq!(inputs.quoting_secs, 7);
     assert_eq!(record.reference_price.map(|p| wire::undec(p).unwrap()), Some(d("75.5")));
-    assert!(matches!(stop(&wire::host::view(&sent))[..], [w::Intent::CancelAll]));
+    let stopped = stop(&wire::host::view(&shown));
+    let all = wire::intent_from_wire(stopped.into_iter().next().unwrap()).unwrap();
+    assert_eq!(all, Intent::on(BULLET, ExchangeIntent::CancelAll(None)));
 }
 
 impl Describe for Echo {
@@ -319,7 +327,10 @@ impl Describe for Echo {
                 mode,
             ],
             settings_schema: schemars::schema_for!(EchoReport),
-            legs: vec![crate::strategy::describe::LegNeed::new("hedge", "hyperliquid")],
+            exchanges: vec![
+                crate::strategy::describe::ExchangeNeed::new(BULLET),
+                crate::strategy::describe::ExchangeNeed::new("hyperliquid"),
+            ],
         }
     }
 }
@@ -340,8 +351,8 @@ fn the_descriptor_crosses_with_its_ranges_and_schema() {
     assert_eq!(mode.guarded.max.map(|m| wire::undec(m).unwrap()), Some(d("1")));
     let schema: serde_json::Value = serde_json::from_str(&wire.settings_schema).unwrap();
     assert!(schema["properties"]["ticks"].is_object());
-    assert_eq!(wire.legs.len(), 1);
-    assert_eq!((wire.legs[0].id.as_str(), wire.legs[0].venue.as_str()), ("hedge", "hyperliquid"));
+    let venues: Vec<&str> = wire.exchanges.iter().map(|e| e.venue.as_str()).collect();
+    assert_eq!(venues, [BULLET, "hyperliquid"]);
 }
 
 /// The section the export macro writes (on wasm32): `name`, a newline, `version`; and `describe`
@@ -354,7 +365,7 @@ fn the_meta_section_holds_the_name_and_version_describe_reports() {
     assert_eq!((d.name.as_str(), d.version.as_str()), (Echo::NAME, Echo::VERSION));
 }
 
-/// Every event the 0.3.0 world added, each case of each answer included.
+/// Every event in the hedge's market and every answer, each case included.
 fn new_events() -> Vec<Event> {
     let trade = Trade {
         exchange: "hyperliquid".into(),
@@ -367,8 +378,7 @@ fn new_events() -> Vec<Event> {
         quantity: d("0.1"),
         timestamp: None,
     };
-    let on =
-        |event| Event::Leg { leg: "hedge".into(), symbol: "ETH".into(), event: Box::new(event) };
+    let on = |event| Event::Market { exchange: "hyperliquid".into(), symbol: "ETH".into(), event };
     let answer = |id, reply| Event::Answer { id, reply };
     let equity =
         AccountEquity { equity: d("100"), wallet_balance: d("90"), unrealized_pnl: d("10") };
@@ -377,10 +387,10 @@ fn new_events() -> Vec<Event> {
     let cancelled =
         CancelResult { order_id: "1".into(), success: false, error: Some("gone".into()) };
     vec![
-        on(Event::Book),
-        on(Event::Mark(d("2500.5"))),
-        on(Event::Fill(trade)),
-        on(Event::Order(resting().remove(0))),
+        on(MarketEvent::Book),
+        on(MarketEvent::Mark(d("2500.5"))),
+        on(MarketEvent::Fill(trade)),
+        on(MarketEvent::Order(resting().remove(0))),
         answer(1, Ok(Answer::OpenOrders(resting()))),
         answer(2, Ok(Answer::Positions(vec![position()]))),
         answer(3, Ok(Answer::Book(book()))),
@@ -395,7 +405,10 @@ fn new_events() -> Vec<Event> {
         answer(9, Ok(Answer::Cancelled(vec![cancelled]))),
         answer(10, Ok(Answer::Done)),
         answer(11, Err(CallError::new("timed out", false, true))),
-        Event::Unknown { intent: Intent::Place(order("76.125", "a")), error: "timeout".into() },
+        Event::Unknown {
+            intent: Intent::on(BULLET, ExchangeIntent::Place(order("76.125", "a"))),
+            error: "timeout".into(),
+        },
     ]
 }
 
@@ -425,8 +438,8 @@ fn every_venue_call_crosses_both_ways() {
         VenueCall::Wait { until_ms: 9 },
     ];
     for call in calls {
-        let intent = Intent::Request { id: 3, leg: "hedge".into(), call };
-        let wired = wire::intent_to_wire(intent.clone()).unwrap().unwrap();
+        let intent = Intent::Request { id: 3, exchange: "hyperliquid".into(), call };
+        let wired = wire::intent_to_wire(intent.clone()).unwrap();
         assert_eq!(wire::intent_from_wire(wired).unwrap(), intent);
     }
 }

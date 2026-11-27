@@ -1,5 +1,32 @@
 # bb-strategy-sdk changelog
 
+## 0.7.0
+
+A strategy sees every exchange it trades, each with its markets: the one main market and its legs are gone.
+Bullet is one exchange like any other, and every strategy trades it. This is a new world, `bb:strategy@0.6.0`:
+plugins built with 0.6 do not load on it, and plugins built with 0.7 need a bot that runs it.
+
+**Breaking**
+- `View` is `now_ms`, `exchanges: &[ExchangeView]`, `limits`, `stop`; `view.exchange(venue)` and
+  `view.market(venue, symbol)` find one. `ExchangeView` holds the venue, its `markets` (`MarketView`: symbol,
+  book, mark, funding rate, facts, position, average entry, realized P&L), `open_orders`, `positions`,
+  `reconnected`, `venue_halt`, `path_stop` and `read_started_ms`; `venue_position(symbol)` reads one position.
+- `Event::Market { exchange, symbol, event }` (`MarketEvent::{Book, Mark, Fill, Order}`) replaces `Book`, `Mark`,
+  `Fill`, `Order` and `Leg`.
+- `Intent::On { exchange, intent }` (`Intent::on(venue, ..)`) carries every order: `ExchangeIntent::{Place,
+  Cancel, CancelAll(symbol), CancelOwn(symbol), Amend, Flatten(symbols)}`. `Intent::Leg`, `Intent::Flatten` and
+  the top-level order intents are gone. `Intent::Request` names its `exchange`; `Intent::ClosePosition` names
+  its `exchange` and `symbol`.
+- `Descriptor::exchanges` (`ExchangeNeed::new(venue)`) replaces `legs`, and must list `BULLET`:
+  `Descriptor::check` (and the component's `init`) refuses one without it, or with a venue twice. `LegView`,
+  `LegNeed` and `TRADE_LEG` are gone.
+- The owner page's `profile::ExchangeNeed` is now `ExchangeRole`.
+- `testing::Market` holds `exchanges` (`testing::exchange`, `testing::market`); `fill_on(exchange, order)`.
+
+**Added**
+- `View::sole_market(venue)`: the one market declared on an exchange.
+- `testing`: `Market::bullet_mut`, `main_mut`, `set_book`, and `on_bullet(symbol, event)`.
+
 ## 0.6.0
 
 The strategy port now carries what the built-in strategies need, so the bot registers them with no

@@ -1,15 +1,18 @@
-//! Helpers for a strategy's own tests (feature `testing`): a market to build views from, and
+//! Helpers for a strategy's own tests (feature `testing`): the exchanges to build views from, and
 //! [`SimHost`], a small simulated host that runs a strategy the way bb-strategy's `StrategyHost`
 //! does (start, events, each intent's outcome fed back, at most 3 nested rounds), without a venue.
 //! Golden replays through the real host live in the host's repository, not here.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::Decimal;
 use crate::history::candles::{Candle, CandleInterval, Warmup};
-use crate::host::legs::LegView;
-use crate::strategy::adapter::{Event, Intent, MarketFacts, StrategyAdapter, StrategyError, View};
-use crate::types::{NewOrder, Order, OrderBook, OrderResult, Position, Side, Trade};
+use crate::host::exchanges::{BULLET, ExchangeView, MarketView};
+use crate::strategy::adapter::{
+    Event, ExchangeIntent, Intent, MarketEvent, StrategyAdapter, StrategyError, View,
+};
+use crate::types::{NewOrder, OrderBook, OrderResult, Side, Trade};
 
 /// `s` as a decimal; zero when it does not parse (tests write literals).
 #[must_use]
@@ -48,67 +51,96 @@ pub fn closed_candles(interval: CandleInterval, now_ms: u64, closes: &[&str]) ->
         .collect()
 }
 
+/// `symbol` with a book of `bid` / `ask` (10 each), flat.
+#[must_use]
+pub fn market(symbol: &str, bid: &str, ask: &str) -> MarketView {
+    MarketView { book: Some(Arc::new(book(bid, ask, "10"))), ..MarketView::new(symbol) }
+}
+
+/// `venue` with `markets`, no orders listed.
+#[must_use]
+pub fn exchange(venue: &str, markets: Vec<MarketView>) -> ExchangeView {
+    ExchangeView { open_orders: Some(Vec::new()), ..ExchangeView::new(venue, markets) }
+}
+
 /// What a test shows a strategy, owned; [`Market::view`] borrows it as the host would.
 #[derive(Debug, Clone, Default)]
 pub struct Market {
     pub now_ms: u64,
-    pub symbol: String,
-    pub book: Option<OrderBook>,
-    pub position: Decimal,
-    pub avg_entry: Option<Decimal>,
-    pub realized_pnl: Decimal,
-    pub open_orders: Option<Vec<Order>>,
-    pub positions: Option<Vec<Position>>,
-    pub reconnected: bool,
-    pub venue_halt: Option<String>,
-    pub market: MarketFacts,
-    pub legs: Vec<LegView>,
-    pub path_stop: Option<String>,
-    pub read_started_ms: Option<u64>,
+    pub exchanges: Vec<ExchangeView>,
     pub limits: Option<crate::LimitsInForce>,
     pub stop: Option<crate::stops::StopReason>,
 }
 
 impl Market {
-    /// `symbol` with a book of `bid` / `ask`, flat, no orders listed, at `now_ms`.
+    /// `symbol` on Bullet with a book of `bid` / `ask`, flat, no orders listed, at `now_ms`.
     #[must_use]
     pub fn new(symbol: &str, bid: &str, ask: &str, now_ms: u64) -> Self {
-        Self {
-            now_ms,
-            symbol: symbol.into(),
-            book: Some(book(bid, ask, "10")),
-            open_orders: Some(Vec::new()),
-            ..Self::default()
-        }
+        Self::of(now_ms, vec![exchange(BULLET, vec![market(symbol, bid, ask)])])
+    }
+
+    /// Several markets on several exchanges (see [`exchange`] and [`market`]), at `now_ms`.
+    #[must_use]
+    pub fn of(now_ms: u64, exchanges: Vec<ExchangeView>) -> Self {
+        Self { now_ms, exchanges, ..Self::default() }
     }
 
     #[must_use]
     pub fn view(&self) -> View<'_> {
+        self.view_over(&self.exchanges)
+    }
+
+    pub fn exchange_mut(&mut self, venue: &str) -> Option<&mut ExchangeView> {
+        self.exchanges.iter_mut().find(|e| e.venue == venue)
+    }
+
+    pub fn market_mut(&mut self, venue: &str, symbol: &str) -> Option<&mut MarketView> {
+        self.exchange_mut(venue)?.markets.iter_mut().find(|m| m.symbol == symbol)
+    }
+
+    /// Bullet, the exchange [`Market::new`] makes.
+    pub fn bullet_mut(&mut self) -> Option<&mut ExchangeView> {
+        self.exchange_mut(BULLET)
+    }
+
+    /// Bullet's first market: the one [`Market::new`] makes.
+    pub fn main_mut(&mut self) -> Option<&mut MarketView> {
+        self.bullet_mut()?.markets.first_mut()
+    }
+
+    /// The book of [`Self::main_mut`]'s market (none: no book).
+    pub fn set_book(&mut self, book: Option<OrderBook>) {
+        if let Some(market) = self.main_mut() {
+            market.book = book.map(Arc::new);
+        }
+    }
+
+    fn view_over<'a>(&'a self, exchanges: &'a [ExchangeView]) -> View<'a> {
         View {
             now_ms: self.now_ms,
-            symbol: &self.symbol,
-            book: self.book.as_ref(),
-            position: self.position,
-            avg_entry: self.avg_entry,
-            realized_pnl: self.realized_pnl,
-            open_orders: self.open_orders.as_deref(),
-            positions: self.positions.as_deref(),
-            reconnected: self.reconnected,
-            venue_halt: self.venue_halt.as_deref(),
-            market: self.market.clone(),
-            legs: &self.legs,
-            path_stop: self.path_stop.as_deref(),
-            read_started_ms: self.read_started_ms,
+            exchanges,
             limits: self.limits.clone(),
             stop: self.stop.as_ref(),
         }
     }
+
+    /// The exchanges as a later round sees them: the host sends open orders only with the first view.
+    fn unlisted(&self) -> Vec<ExchangeView> {
+        let unlist = |e: &ExchangeView| ExchangeView { open_orders: None, ..e.clone() };
+        self.exchanges.iter().map(unlist).collect()
+    }
 }
 
-/// The places among `intents`.
+/// The places among `intents`, on every exchange.
 #[must_use]
 pub fn placed(intents: &[Intent]) -> Vec<&NewOrder> {
-    intents.iter().filter_map(|i| if let Intent::Place(o) = i { Some(o) } else { None }).collect()
+    intents
+        .iter()
+        .filter_map(|i| match i {
+            Intent::On { intent: ExchangeIntent::Place(o), .. } => Some(o),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The venue's answer to `intent`: taken (`Ok`, with an order id) or refused (`Err`, why).
@@ -128,14 +160,15 @@ pub fn outcome(intent: &Intent, answer: Result<&str, &str>) -> Event {
 
 fn client_id(intent: &Intent) -> Option<String> {
     match intent {
-        Intent::Place(o) => o.client_id.clone(),
-        Intent::Amend(a) => a.new_order.client_id.clone(),
-        Intent::Cancel(c) => c.client_id.clone(),
-        Intent::Leg { intent, .. } => client_id(intent),
-        Intent::CancelAll
-        | Intent::CancelOwn
-        | Intent::Shutdown(_)
-        | Intent::Flatten { .. }
+        Intent::On { intent, .. } => match intent {
+            ExchangeIntent::Place(o) => o.client_id.clone(),
+            ExchangeIntent::Amend(a) => a.new_order.client_id.clone(),
+            ExchangeIntent::Cancel(c) => c.client_id.clone(),
+            ExchangeIntent::CancelAll(_)
+            | ExchangeIntent::CancelOwn(_)
+            | ExchangeIntent::Flatten(_) => None,
+        },
+        Intent::Shutdown(_)
         | Intent::Request { .. }
         | Intent::Reply { .. }
         | Intent::Persist(_)
@@ -147,11 +180,23 @@ fn client_id(intent: &Intent) -> Option<String> {
     }
 }
 
-/// A full fill of `order`.
+/// `event` in the market `symbol` on Bullet.
+#[must_use]
+pub fn on_bullet(symbol: &str, event: MarketEvent) -> Event {
+    Event::Market { exchange: BULLET.into(), symbol: symbol.into(), event }
+}
+
+/// A full fill of `order` on Bullet.
 #[must_use]
 pub fn fill_of(order: &NewOrder) -> Event {
-    Event::Fill(Trade {
-        exchange: "sim".into(),
+    fill_on(BULLET, order)
+}
+
+/// A full fill of `order` on `exchange`.
+#[must_use]
+pub fn fill_on(exchange: &str, order: &NewOrder) -> Event {
+    let trade = Trade {
+        exchange: exchange.into(),
         symbol: order.symbol.clone(),
         order_id: order.client_id.clone().unwrap_or_default(),
         trade_id: None,
@@ -160,7 +205,12 @@ pub fn fill_of(order: &NewOrder) -> Event {
         price: order.price,
         quantity: order.quantity,
         timestamp: None,
-    })
+    };
+    Event::Market {
+        exchange: exchange.into(),
+        symbol: order.symbol.clone(),
+        event: MarketEvent::Fill(trade),
+    }
 }
 
 /// How many times the strategy's answers to outcomes are carried out in turn, as the host does.
@@ -201,12 +251,14 @@ impl<S: StrategyAdapter> SimHost<S> {
         }
     }
 
-    /// `event`, then the answers to what it asked. A fill moves the position first.
+    /// `event`, then the answers to what it asked. A fill moves its market's position first.
     pub fn send(&mut self, event: &Event) -> Vec<Intent> {
-        if let Event::Fill(trade) = event {
-            self.market.position = match trade.side {
-                Side::Buy => self.market.position.saturating_add(trade.quantity),
-                Side::Sell => self.market.position.saturating_sub(trade.quantity),
+        if let Event::Market { exchange, symbol, event: MarketEvent::Fill(trade) } = event
+            && let Some(market) = self.market.market_mut(exchange, symbol)
+        {
+            market.position = match trade.side {
+                Side::Buy => market.position.saturating_add(trade.quantity),
+                Side::Sell => market.position.saturating_sub(trade.quantity),
             };
         }
         let first = self.strategy.on_event(event, &self.market.view());
@@ -229,25 +281,24 @@ impl<S: StrategyAdapter> SimHost<S> {
             let mut next = Vec::new();
             // The host answers cancels first, then amends, then places (not input order).
             let rank = |i: &&Intent| match i {
-                Intent::Cancel(_) => 0,
-                Intent::Amend(_) => 1,
+                Intent::On { intent: ExchangeIntent::Cancel(_), .. } => 0,
+                Intent::On { intent: ExchangeIntent::Amend(_), .. } => 1,
                 _ => 2,
             };
             let mut answered: Vec<&Intent> = intents.iter().collect();
             answered.sort_by_key(rank);
             for intent in answered {
                 let refusal = match intent {
-                    Intent::Place(o) => (self.refuse)(o),
-                    Intent::Leg { intent: inner, .. } => match &**inner {
-                        Intent::Place(o) => (self.refuse)(o),
-                        _ => None,
+                    Intent::On { intent, .. } => match intent {
+                        ExchangeIntent::Place(o) => (self.refuse)(o),
+                        ExchangeIntent::Cancel(_)
+                        | ExchangeIntent::Amend(_)
+                        | ExchangeIntent::Flatten(_) => None,
+                        ExchangeIntent::CancelAll(_) | ExchangeIntent::CancelOwn(_) => continue,
                     },
-                    Intent::Cancel(_) | Intent::Amend(_) | Intent::Flatten { .. } => None,
                     // A request is answered between events: a test sends its `Event::Answer`, and
                     // its `Event::Closed` for a close.
-                    Intent::CancelAll
-                    | Intent::CancelOwn
-                    | Intent::Shutdown(_)
+                    Intent::Shutdown(_)
                     | Intent::Request { .. }
                     | Intent::Reply { .. }
                     | Intent::Notify(_)
@@ -258,10 +309,11 @@ impl<S: StrategyAdapter> SimHost<S> {
                     // An acked write is applied at once; one nothing waits for asks no answer.
                     Intent::Persist(write) => {
                         if let Some(id) = write.ack {
-                            let mut view = self.market.view();
-                            view.open_orders = None;
+                            let unlisted = self.market.unlisted();
                             let applied = Event::Persisted { id, result: Ok(()) };
-                            next.extend(self.strategy.on_event(&applied, &view));
+                            next.extend(
+                                self.strategy.on_event(&applied, &self.market.view_over(&unlisted)),
+                            );
                         }
                         continue;
                     }
@@ -272,10 +324,8 @@ impl<S: StrategyAdapter> SimHost<S> {
                     let id = self.next_order_id();
                     outcome(intent, Ok(&id))
                 };
-                // The host sends open orders only with the first view.
-                let mut view = self.market.view();
-                view.open_orders = None;
-                next.extend(self.strategy.on_event(&event, &view));
+                let unlisted = self.market.unlisted();
+                next.extend(self.strategy.on_event(&event, &self.market.view_over(&unlisted)));
             }
             self.sent.extend(intents.iter().cloned());
             all.append(&mut intents);

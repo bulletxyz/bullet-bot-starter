@@ -21,13 +21,13 @@ pub struct Profile {
     /// It stops itself at a daily loss. One without is only ever started or switched to by the
     /// owner's signature: no unlock covers it.
     pub has_loss_stop: bool,
-    pub exchanges: Vec<ExchangeNeed>,
+    pub exchanges: Vec<ExchangeRole>,
     pub presets: Vec<Preset>,
 }
 
 /// A venue the strategy trades on or reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct ExchangeNeed {
+pub struct ExchangeRole {
     /// `venue` (where it trades), `hedge`, `reference`.
     pub role: &'static str,
     /// The setting that names the exchange; `None`: fixed to `default`.

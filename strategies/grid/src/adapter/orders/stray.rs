@@ -1,7 +1,7 @@
 //! Orders the grid let go of before it saw them gone (a pause's cancel, a level a read omitted): a read past the
 //! settle margin that still lists one cancels it again, never an order the grid did not let go of.
 
-use bb_strategy_sdk::{CancelOrder, Intent, Order};
+use bb_strategy_sdk::{CancelOrder, ExchangeIntent, Intent, Order};
 
 use crate::adapter::{GridStrategy, SETTLE_MS};
 
@@ -31,11 +31,11 @@ impl GridStrategy {
                 return false;
             };
             tracing::warn!(client_id = %cid, "A grid order let go of still rests: cancelling it");
-            out.push(Intent::Cancel(CancelOrder {
+            out.push(Self::on_bullet(ExchangeIntent::Cancel(CancelOrder {
                 symbol: symbol.clone(),
                 order_id: order.id.clone(),
                 client_id: Some(cid.clone()),
-            }));
+            })));
             *at = read_ms;
             true
         });

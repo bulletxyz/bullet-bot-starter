@@ -10,9 +10,10 @@
 //! trading is the default, and the daily loss stop applies. A strategy only returns intents.
 
 use bb_strategy_sdk::{
-    CancelOrder, Decimal, Describe, Descriptor, Event, FromSettings, Intent, Loosening, NewOrder,
-    OrderBook, OrderStatus, OrderType, Range, ReportField, SettingSpec, Side, StrategyAdapter,
-    StrategyError, StrategyReport, Tier, View,
+    BULLET, CancelOrder, Decimal, Describe, Descriptor, Event, ExchangeIntent, ExchangeNeed,
+    FromSettings, Intent, Loosening, MarketEvent, NewOrder, OrderBook, OrderStatus, OrderType,
+    Range, ReportField, SettingSpec, Side, StrategyAdapter, StrategyError, StrategyReport, Tier,
+    View,
 };
 use serde::{Deserialize, Serialize};
 
@@ -102,16 +103,20 @@ impl __TYPE__ {
     /// Place each free side, and cancel an order the mid has moved a full spacing away from (it
     /// is placed again at the new price once the venue says it is cancelled).
     fn quote(&mut self, view: &View<'_>) -> Vec<Intent> {
+        // It trades one market on Bullet: the one the bot gives it.
+        let (Some(bullet), Some(market)) = (view.exchange(BULLET), view.sole_market(BULLET)) else {
+            return Vec::new();
+        };
         // The venue or the bot refuses new orders for now: wait.
-        if view.venue_halt.is_some() || view.path_stop.is_some() {
+        if bullet.venue_halt.is_some() || bullet.path_stop.is_some() {
             return Vec::new();
         }
-        let Some(mid) = view.book.and_then(OrderBook::midpoint) else { return Vec::new() };
+        let Some(mid) = market.book().and_then(OrderBook::midpoint) else { return Vec::new() };
         let Some(spacing) = self.spacing(mid) else { return Vec::new() };
         let mut out = Vec::new();
         for side in [Side::Buy, Side::Sell] {
-            let Some(target) = self.price(side, mid, view.market.tick_size) else { continue };
-            let room = self.room(side, view.position);
+            let Some(target) = self.price(side, mid, market.facts.tick_size) else { continue };
+            let room = self.room(side, market.position);
             match &mut self.quotes[slot(side)] {
                 Some(q)
                     if !q.cancelling
@@ -120,11 +125,14 @@ impl __TYPE__ {
                     q.cancelling = true;
                     q.sent_ms = view.now_ms;
                     // By client id: the order id stays empty.
-                    out.push(Intent::Cancel(CancelOrder {
-                        symbol: view.symbol.to_owned(),
-                        order_id: String::new(),
-                        client_id: Some(q.client_id.clone()),
-                    }));
+                    out.push(Intent::on(
+                        BULLET,
+                        ExchangeIntent::Cancel(CancelOrder {
+                            symbol: market.symbol.clone(),
+                            order_id: String::new(),
+                            client_id: Some(q.client_id.clone()),
+                        }),
+                    ));
                 }
                 None if room => {
                     let client_id = self.next_client_id();
@@ -135,8 +143,8 @@ impl __TYPE__ {
                         sent_ms: view.now_ms,
                         cancelling: false,
                     });
-                    out.push(Intent::Place(NewOrder {
-                        symbol: view.symbol.to_owned(),
+                    out.push(Intent::on(BULLET, ExchangeIntent::Place(NewOrder {
+                        symbol: market.symbol.clone(),
                         side,
                         order_type: OrderType::PostOnly,
                         price: target,
@@ -144,7 +152,7 @@ impl __TYPE__ {
                         client_id: Some(client_id),
                         reduce_only: false,
                         protect: None,
-                    }));
+                    })));
                 }
                 // Its cancel is out, or the order rests near enough, or there is no room.
                 _ => {}
@@ -170,7 +178,8 @@ impl __TYPE__ {
     /// never landed, or its end was missed); one it lists still rests, so a cancel that did not
     /// take is sent again on the next book.
     fn reconcile(&mut self, view: &View<'_>) {
-        let (Some(open), Some(read_ms)) = (view.open_orders, view.read_started_ms) else { return };
+        let Some(bullet) = view.exchange(BULLET) else { return };
+        let (Some(open), Some(read_ms)) = (&bullet.open_orders, bullet.read_started_ms) else { return };
         for q in &mut self.quotes {
             let Some(quote) = q.as_mut() else { continue };
             if read_ms < quote.sent_ms.saturating_add(LIST_LAG_MS) {
@@ -181,6 +190,38 @@ impl __TYPE__ {
             } else {
                 *q = None;
             }
+        }
+    }
+
+    /// Something in its market on Bullet: a book, a fill, an order update (a mark changes nothing).
+    fn on_market(&mut self, event: &MarketEvent, view: &View<'_>) -> Vec<Intent> {
+        match event {
+            MarketEvent::Book => self.quote(view),
+            MarketEvent::Fill(trade) => {
+                self.fills = self.fills.saturating_add(1);
+                if let Some(at) = self.slot_of(trade.client_id.as_deref())
+                    && let Some(q) = self.quotes[at].as_mut()
+                {
+                    q.filled = q.filled.saturating_add(trade.quantity);
+                    // A partial fill keeps the side taken: the rest of the order still rests.
+                    if q.filled >= self.settings.order_size {
+                        self.quotes[at] = None;
+                    }
+                }
+                Vec::new()
+            }
+            // The venue says the order ended (a cancel is confirmed here, not by its outcome):
+            // the side is free and placed again at once.
+            MarketEvent::Order(order)
+                if matches!(
+                    order.status,
+                    OrderStatus::Cancelled | OrderStatus::Rejected | OrderStatus::Filled
+                ) =>
+            {
+                self.free(order.client_id.as_deref());
+                self.quote(view)
+            }
+            MarketEvent::Order(_) | MarketEvent::Mark(_) => Vec::new(),
         }
     }
 }
@@ -195,38 +236,16 @@ impl StrategyAdapter for __TYPE__ {
 
     fn on_event(&mut self, event: &Event, view: &View<'_>) -> Vec<Intent> {
         match event {
-            Event::Book => self.quote(view),
+            Event::Market { exchange, event, .. } if exchange == BULLET => self.on_market(event, view),
             Event::Tick => {
                 self.reconcile(view);
                 self.quote(view)
             }
-            Event::Fill(trade) => {
-                self.fills = self.fills.saturating_add(1);
-                if let Some(at) = self.slot_of(trade.client_id.as_deref())
-                    && let Some(q) = self.quotes[at].as_mut()
-                {
-                    q.filled = q.filled.saturating_add(trade.quantity);
-                    // A partial fill keeps the side taken: the rest of the order still rests.
-                    if q.filled >= self.settings.order_size {
-                        self.quotes[at] = None;
-                    }
-                }
-                Vec::new()
-            }
-            Event::Outcome { intent: Intent::Place(order), result } if !result.success => {
-                self.free(order.client_id.as_deref());
-                Vec::new()
-            }
-            // The venue says the order ended (a cancel is confirmed here, not by its outcome):
-            // the side is free and placed again at once.
-            Event::Order(order)
-                if matches!(
-                    order.status,
-                    OrderStatus::Cancelled | OrderStatus::Rejected | OrderStatus::Filled
-                ) =>
+            Event::Outcome { intent: Intent::On { intent: ExchangeIntent::Place(order), .. }, result }
+                if !result.success =>
             {
                 self.free(order.client_id.as_deref());
-                self.quote(view)
+                Vec::new()
             }
             // An order whose outcome is unknown may rest or have filled, and a refused cancel may
             // have left it resting: its side stays taken until its events come or a fresh read
@@ -235,9 +254,10 @@ impl StrategyAdapter for __TYPE__ {
         }
     }
 
-    fn stop(&mut self, _view: &View<'_>) -> Vec<Intent> {
+    fn stop(&mut self, view: &View<'_>) -> Vec<Intent> {
         self.quotes = [None, None];
-        vec![Intent::CancelAll]
+        let symbol = view.sole_market(BULLET).map(|m| m.symbol.clone());
+        vec![Intent::on(BULLET, ExchangeIntent::CancelAll(symbol))]
     }
 
     fn report(&self) -> Report {
@@ -322,7 +342,7 @@ impl Describe for __TYPE__ {
                 .required(),
             ],
             settings_schema: schemars::schema_for!(Settings),
-            legs: Vec::new(),
+            exchanges: vec![ExchangeNeed::new(BULLET)],
         }
     }
 }

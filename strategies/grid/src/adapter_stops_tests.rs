@@ -12,37 +12,38 @@ fn past_the_hard_stop_it_cancels_its_own_orders_closes_reduce_only_and_stops() {
     let two = d("2");
     // 72.1 is above the stop at 72: nothing yet.
     let near = book("72.0", "72.2");
-    let out = grid.on_event(&Event::Book, &at(Some(&near), &[], NOON, two));
+    let out = grid.on_event(&book_event(), &at(Some(&near), &[], NOON, two).view());
     assert!(out.is_empty(), "{out:?}");
     // 71.9: cancel its own orders (the owner's on the market stay: a normal stop) and sell the 2
     // held, reduce-only, at most 20 bps past the bid.
     let past = book("71.8", "72.0");
-    let out = grid.on_event(&Event::Book, &at(Some(&past), &[], NOON, two));
-    assert!(matches!(out[0], Intent::CancelOwn), "{out:?}");
+    let out = grid.on_event(&book_event(), &at(Some(&past), &[], NOON, two).view());
+    assert!(out[0] == cancel_own(), "{out:?}");
     assert_eq!(closes(&out), [(Side::Sell, two, true, OrderType::Market)]);
     assert!(report(&grid)["stopped"].as_str().unwrap().contains("hard stop"));
     // Still holding on the next tick: close again, wider; never a level.
     let back = mid_book();
-    let out = grid.on_event(&Event::Tick, &at(Some(&back), &[], NOON + 5_000, d("0.5")));
+    let out = grid.on_event(&Event::Tick, &at(Some(&back), &[], NOON + 5_000, d("0.5")).view());
     assert_eq!(closes(&out), [(Side::Sell, d("0.5"), true, OrderType::Market)]);
     assert!(placements(&out)[0].price < d("75.4"), "past the bid: {:?}", placements(&out)[0].price);
     // Flat: nothing more, ever.
-    let out = grid.on_event(&Event::Tick, &at(Some(&back), &[], NOON + 10_000, Decimal::ZERO));
+    let out =
+        grid.on_event(&Event::Tick, &at(Some(&back), &[], NOON + 10_000, Decimal::ZERO).view());
     assert!(out.is_empty(), "{out:?}");
-    let fill = Event::Fill(trade(Some("x"), Side::Buy, "75"));
-    assert!(grid.on_event(&fill, &view(Some(&back), &[], NOON)).is_empty());
+    let fill = fill_event(trade(Some("x"), Side::Buy, "75"));
+    assert!(grid.on_event(&fill, &view(Some(&back), &[], NOON).view()).is_empty());
 }
 
 #[test]
 fn the_short_sides_hard_stop_is_above_the_range_and_buys_back() {
     let (mut grid, _) = running(test_config());
     let past = book("80.0", "80.2");
-    let out = grid.on_event(&Event::Book, &at(Some(&past), &[], NOON, d("-3")));
+    let out = grid.on_event(&book_event(), &at(Some(&past), &[], NOON, d("-3")).view());
     assert_eq!(closes(&out), [(Side::Buy, d("3"), true, OrderType::Market)]);
     // A long grid has no stop above: the price above its range is its profitable side.
     let long = with(test_config(), serde_json::json!({ "direction": "long" }));
     let (mut grid, _) = running(long);
-    let out = grid.on_event(&Event::Book, &at(Some(&past), &[], NOON, Decimal::ZERO));
+    let out = grid.on_event(&book_event(), &at(Some(&past), &[], NOON, Decimal::ZERO).view());
     assert!(out.is_empty(), "{out:?}");
 }
 
@@ -56,7 +57,7 @@ fn the_hard_stop_holds_the_instance_and_says_why() {
         count.fetch_add(1, Ordering::SeqCst);
     }));
     let past = book("71.8", "72.0");
-    let out = grid.on_event(&Event::Book, &at(Some(&past), &[], NOON, d("2")));
+    let out = grid.on_event(&book_event(), &at(Some(&past), &[], NOON, d("2")).view());
     assert_eq!(asked.load(Ordering::SeqCst), 1, "the instance is held");
     let said = out.iter().find_map(|i| match i {
         Intent::Notify(bb_strategy_sdk::Alert::Raise { text, .. }) => Some(text.clone()),
@@ -64,7 +65,7 @@ fn the_hard_stop_holds_the_instance_and_says_why() {
     });
     let said = said.expect("the owner is told");
     assert!(said.contains("hard stop") && said.contains("resume"), "{said}");
-    let out = grid.on_event(&Event::Tick, &at(Some(&mid_book()), &[], NOON + 5_000, d("2")));
+    let out = grid.on_event(&Event::Tick, &at(Some(&mid_book()), &[], NOON + 5_000, d("2")).view());
     assert_eq!(closes(&out), [(Side::Sell, d("2"), true, OrderType::Market)], "it closes again");
     assert_eq!(asked.load(Ordering::SeqCst), 1, "asked once");
 
@@ -75,12 +76,12 @@ fn the_hard_stop_holds_the_instance_and_says_why() {
         .with_day_stop(Arc::new(move || probe.load(Ordering::SeqCst)))
         .with_hard_stop_hold(Arc::new(|| panic!("the loss watch holds a daily loss trip")));
     tripped.store(true, Ordering::SeqCst);
-    let out = grid.on_event(&Event::Tick, &at(Some(&mid_book()), &[], NOON, d("2")));
-    assert!(matches!(out[0], Intent::CancelAll), "{out:?}");
+    let out = grid.on_event(&Event::Tick, &at(Some(&mid_book()), &[], NOON, d("2")).view());
+    assert!(out[0] == cancel_all(), "{out:?}");
 
     // The owner's resume starts a new grid, which ends the hard stop's alert.
     let mut resumed = GridStrategy::new(test_config()).with_hard_stop_hold(Arc::new(|| {}));
-    let start = resumed.start(&view(Some(&mid_book()), &[], NOON)).unwrap();
+    let start = resumed.start(&view(Some(&mid_book()), &[], NOON).view()).unwrap();
     let resolved = start.iter().any(|i| {
         matches!(i, Intent::Notify(bb_strategy_sdk::Alert::Resolve { key }) if key == crate::KEY_HARD_STOP)
     });
@@ -101,20 +102,20 @@ fn the_hard_stop_stands_the_instance_down_through_the_port() {
     };
     let (mut grid, _) = running(test_config());
     let past = book("71.8", "72.0");
-    let out = grid.on_event(&Event::Book, &at(Some(&past), &[], NOON, d("2")));
+    let out = grid.on_event(&book_event(), &at(Some(&past), &[], NOON, d("2")).view());
     let [why] = stood(&out).try_into().unwrap_or_else(|o| panic!("one stand-down: {o:?}"));
     assert!(why.contains("hard stop"), "{why}");
     let raised = out.iter().any(|i| {
         matches!(i, Intent::Notify(bb_strategy_sdk::Alert::Raise { key, .. }) if key == crate::KEY_HARD_STOP)
     });
     assert!(raised, "{out:?}");
-    let out = grid.on_event(&Event::Tick, &at(Some(&mid_book()), &[], NOON + 5_000, d("2")));
+    let out = grid.on_event(&Event::Tick, &at(Some(&mid_book()), &[], NOON + 5_000, d("2")).view());
     assert!(stood(&out).is_empty(), "asked once: {out:?}");
 
     // A build that holds the instance itself is asked instead, as before.
     let (grid, _) = running(test_config());
     let mut held = grid.with_hard_stop_hold(Arc::new(|| {}));
-    let out = held.on_event(&Event::Book, &at(Some(&past), &[], NOON, d("2")));
+    let out = held.on_event(&book_event(), &at(Some(&past), &[], NOON, d("2")).view());
     assert!(stood(&out).is_empty(), "{out:?}");
 
     let loss = bb_strategy_sdk::stops::StopReason::DailyLoss {
@@ -123,9 +124,9 @@ fn the_hard_stop_stands_the_instance_down_through_the_port() {
     let (mut grid, _) = running(test_config());
     let out = grid.on_event(
         &Event::Tick,
-        &View { stop: Some(&loss), ..at(Some(&mid_book()), &[], NOON, d("2")) },
+        &Market { stop: Some(loss.clone()), ..at(Some(&mid_book()), &[], NOON, d("2")) }.view(),
     );
-    assert!(matches!(out[0], Intent::CancelAll) && stood(&out).is_empty(), "{out:?}");
+    assert!(out[0] == cancel_all() && stood(&out).is_empty(), "{out:?}");
 }
 
 // --- Rule 4: the daily loss stop. ---
@@ -139,18 +140,18 @@ fn the_daily_loss_stop_flattens_and_stops_the_grid() {
     let (mut grid, _) = running_on(grid, &mid_book());
     let b = mid_book();
     assert!(
-        placements(&grid.on_event(&Event::Tick, &at(Some(&b), &[], NOON, d("1"))))
+        placements(&grid.on_event(&Event::Tick, &at(Some(&b), &[], NOON, d("1")).view()))
             .iter()
             .all(|o| !o.reduce_only)
     );
     tripped.store(true, Ordering::SeqCst);
-    let out = grid.on_event(&Event::Tick, &at(Some(&b), &[], NOON + 5_000, d("1")));
+    let out = grid.on_event(&Event::Tick, &at(Some(&b), &[], NOON + 5_000, d("1")).view());
     // The daily loss stop is a safety stop: every order on the market goes, as the path's halt.
-    assert!(matches!(out[0], Intent::CancelAll), "{out:?}");
+    assert!(out[0] == cancel_all(), "{out:?}");
     assert_eq!(closes(&out), [(Side::Sell, d("1"), true, OrderType::Market)]);
     assert!(report(&grid)["stopped"].as_str().unwrap().contains("daily loss"));
     // Winding down with a position left closes it too.
-    let out = grid.stop(&at(Some(&b), &[], NOON + 6_000, d("1")));
+    let out = grid.stop(&at(Some(&b), &[], NOON + 6_000, d("1")).view());
     assert_eq!(closes(&out), [(Side::Sell, d("1"), true, OrderType::Market)]);
 }
 
@@ -162,15 +163,17 @@ fn the_hosts_daily_loss_stop_in_the_view_flattens_and_stops_the_grid() {
     let (mut grid, _) = running(test_config());
     let b = mid_book();
     let paused = StopReason::Paused;
-    let held = grid
-        .on_event(&Event::Tick, &View { stop: Some(&paused), ..at(Some(&b), &[], NOON, d("1")) });
-    assert!(held.iter().all(|i| !matches!(i, Intent::CancelAll)), "{held:?}");
+    let held = grid.on_event(
+        &Event::Tick,
+        &Market { stop: Some(paused.clone()), ..at(Some(&b), &[], NOON, d("1")) }.view(),
+    );
+    assert!(held.iter().all(|i| *i != cancel_all()), "{held:?}");
     let loss = StopReason::DailyLoss { day: bb_strategy_sdk::stops::utc_day(NOON) };
     let out = grid.on_event(
         &Event::Tick,
-        &View { stop: Some(&loss), ..at(Some(&b), &[], NOON + 5_000, d("1")) },
+        &Market { stop: Some(loss.clone()), ..at(Some(&b), &[], NOON + 5_000, d("1")) }.view(),
     );
-    assert!(matches!(out[0], Intent::CancelAll), "{out:?}");
+    assert!(out[0] == cancel_all(), "{out:?}");
     assert_eq!(closes(&out), [(Side::Sell, d("1"), true, OrderType::Market)]);
     assert!(report(&grid)["stopped"].as_str().unwrap().contains("daily loss"));
 }
@@ -184,22 +187,29 @@ fn a_failed_daily_loss_cancel_is_asked_again_market_wide() {
         .with_day_stop(Arc::new(move || probe.load(Ordering::SeqCst)));
     let (mut grid, _) = running_on(grid, &mid_book());
     let b = mid_book();
-    let out = grid.on_event(&Event::Tick, &at(Some(&b), &[], NOON, Decimal::ZERO));
-    assert!(matches!(out.as_slice(), [Intent::CancelAll]), "{out:?}");
-    let failed = Event::Failed { intent: Intent::CancelAll, error: "transport".into() };
-    grid.on_event(&failed, &at(Some(&b), &[], NOON + 1_000, Decimal::ZERO));
-    let again = grid.on_event(&Event::Tick, &at(Some(&b), &[], NOON + 6_000, Decimal::ZERO));
-    assert!(matches!(again.as_slice(), [Intent::CancelAll]), "{again:?}");
+    let out = grid.on_event(&Event::Tick, &at(Some(&b), &[], NOON, Decimal::ZERO).view());
+    assert!(out == [cancel_all()], "{out:?}");
+    let failed = Event::Failed { intent: cancel_all(), error: "transport".into() };
+    grid.on_event(&failed, &at(Some(&b), &[], NOON + 1_000, Decimal::ZERO).view());
+    let again = grid.on_event(&Event::Tick, &at(Some(&b), &[], NOON + 6_000, Decimal::ZERO).view());
+    assert!(again == [cancel_all()], "{again:?}");
 }
 
 /// The grid passed its hard stop flat: it asked to cancel its own orders, and closes nothing.
 fn tripped() -> (GridStrategy, OrderBook) {
     let (mut grid, _) = running(test_config());
     let past = book("71.8", "72.0");
-    let out = grid.on_event(&Event::Book, &view(Some(&past), &[], NOON));
+    let out = grid.on_event(&book_event(), &view(Some(&past), &[], NOON).view());
     // Flat: its own orders pulled, nothing to close; the instance stood down and the owner told.
     assert!(
-        matches!(out.as_slice(), [Intent::CancelOwn, Intent::StandDown(_), Intent::Notify(_)]),
+        matches!(
+            out.as_slice(),
+            [
+                Intent::On { intent: ExchangeIntent::CancelOwn(_), .. },
+                Intent::StandDown(_),
+                Intent::Notify(_)
+            ]
+        ),
         "{out:?}"
     );
     (grid, past)
@@ -208,7 +218,7 @@ fn tripped() -> (GridStrategy, OrderBook) {
 fn cancel_all_answer(success: bool) -> Event {
     let error = (!success).then(|| "venue down".to_string());
     Event::Outcome {
-        intent: Intent::CancelOwn,
+        intent: cancel_own(),
         result: OrderResult { order_id: None, client_id: None, success, error },
     }
 }
@@ -219,47 +229,53 @@ fn cancel_all_answer(success: bool) -> Event {
 fn a_failed_cancel_all_is_asked_again_on_the_next_tick_until_it_lands() {
     let (mut grid, past) = tripped();
     assert!(
-        grid.on_event(&cancel_all_answer(false), &view(Some(&past), &[], NOON + 1_000)).is_empty()
+        grid.on_event(&cancel_all_answer(false), &view(Some(&past), &[], NOON + 1_000).view())
+            .is_empty()
     );
-    let again = grid.on_event(&Event::Tick, &view(Some(&past), &[], NOON + 6_000));
-    assert!(matches!(again.as_slice(), [Intent::CancelOwn]), "{again:?}");
-    grid.on_event(&cancel_all_answer(false), &view(Some(&past), &[], NOON + 6_500));
-    let third = grid.on_event(&Event::Tick, &view(Some(&past), &[], NOON + 11_000));
-    assert!(matches!(third.as_slice(), [Intent::CancelOwn]), "{third:?}");
+    let again = grid.on_event(&Event::Tick, &view(Some(&past), &[], NOON + 6_000).view());
+    assert!(again == [cancel_own()], "{again:?}");
+    grid.on_event(&cancel_all_answer(false), &view(Some(&past), &[], NOON + 6_500).view());
+    let third = grid.on_event(&Event::Tick, &view(Some(&past), &[], NOON + 11_000).view());
+    assert!(third == [cancel_own()], "{third:?}");
     // Once it lands the stopped grid stays quiet.
-    grid.on_event(&cancel_all_answer(true), &view(Some(&past), &[], NOON + 11_500));
-    assert!(grid.on_event(&Event::Tick, &view(Some(&past), &[], NOON + 16_000)).is_empty());
+    grid.on_event(&cancel_all_answer(true), &view(Some(&past), &[], NOON + 11_500).view());
+    assert!(grid.on_event(&Event::Tick, &view(Some(&past), &[], NOON + 16_000).view()).is_empty());
 }
 
 #[test]
 fn a_cancel_all_that_failed_as_a_whole_is_asked_again_too() {
     let (mut grid, past) = tripped();
-    let failed = Event::Failed { intent: Intent::CancelOwn, error: "transport".into() };
-    assert!(grid.on_event(&failed, &view(Some(&past), &[], NOON + 1_000)).is_empty());
-    let again = grid.on_event(&Event::Tick, &view(Some(&past), &[], NOON + 6_000));
-    assert!(matches!(again.as_slice(), [Intent::CancelOwn]), "{again:?}");
+    let failed = Event::Failed { intent: cancel_own(), error: "transport".into() };
+    assert!(grid.on_event(&failed, &view(Some(&past), &[], NOON + 1_000).view()).is_empty());
+    let again = grid.on_event(&Event::Tick, &view(Some(&past), &[], NOON + 6_000).view());
+    assert!(again == [cancel_own()], "{again:?}");
 }
 
 #[test]
 fn the_owner_is_told_after_five_failed_cancel_alls_in_a_row_and_the_grid_keeps_trying() {
     let (mut grid, past) = tripped();
-    let raised = |i: &Intent| matches!(i, Intent::Notify(bb_strategy_sdk::Alert::Raise { key, .. }) if key == "grid_cancel_all_failing");
+    let raised = |i: &Intent| {
+        matches!(i, Intent::Notify(bb_strategy_sdk::Alert::Raise { key, .. })
+            if key == "grid_cancel_all_failing")
+    };
     let mut alerts = Vec::new();
     let mut raised_at = Vec::new();
     for n in 1..=7_u64 {
-        let out =
-            grid.on_event(&cancel_all_answer(false), &view(Some(&past), &[], NOON + n * 5_000));
+        let out = grid
+            .on_event(&cancel_all_answer(false), &view(Some(&past), &[], NOON + n * 5_000).view());
         if out.iter().any(raised) {
             raised_at.push(n);
         }
         alerts.extend(out);
-        let again = grid.on_event(&Event::Tick, &view(Some(&past), &[], NOON + 2_000 + n * 5_000));
-        assert!(matches!(again.as_slice(), [Intent::CancelOwn]), "keeps trying: {again:?}");
+        let again =
+            grid.on_event(&Event::Tick, &view(Some(&past), &[], NOON + 2_000 + n * 5_000).view());
+        assert!(again == [cancel_own()], "keeps trying: {again:?}");
     }
     assert_eq!(alerts.iter().filter(|i| raised(i)).count(), 1, "told once: {alerts:?}");
     assert_eq!(raised_at, [5], "and at the fifth failure, not before or after");
     // It lands: the alert is resolved.
-    let out = grid.on_event(&cancel_all_answer(true), &view(Some(&past), &[], NOON + 200_000));
+    let out =
+        grid.on_event(&cancel_all_answer(true), &view(Some(&past), &[], NOON + 200_000).view());
     assert!(
         matches!(out.as_slice(), [Intent::Notify(bb_strategy_sdk::Alert::Resolve { .. })]),
         "{out:?}"
@@ -272,7 +288,8 @@ fn the_owner_is_told_after_five_failed_cancel_alls_in_a_row_and_the_grid_keeps_t
 fn the_stop_the_venue_holds_is_the_hard_stop() {
     let (grid, _) = running(test_config());
     let book = mid_book();
-    let stop = |position: &str| grid.protective_stop(&at(Some(&book), &[], NOON, d(position)));
+    let stop =
+        |position: &str| grid.protective_stop(&at(Some(&book), &[], NOON, d(position)).view());
     assert_eq!(stop("2").and_then(|p| p.stop), Some(d("72")), "the long side's, at 72");
     assert_eq!(stop("-3").and_then(|p| p.stop), Some(d("80")), "the short side's, at 80");
     assert_eq!(stop("0"), None);

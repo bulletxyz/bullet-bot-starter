@@ -16,7 +16,7 @@ impl GridStrategy {
         let Some(cfg) = self.config.trend_filter.clone() else {
             return Vec::new();
         };
-        let Some(mid) = view.book.and_then(OrderBook::midpoint) else {
+        let Some(mid) = self.book(view).and_then(OrderBook::midpoint) else {
             return Vec::new();
         };
         let was_paused = self.state.paused;
@@ -27,7 +27,7 @@ impl GridStrategy {
                 threshold_bps = %cfg.pause_divergence_bps,
                 "Trend filter tripped — cancelling the grid's opening orders"
             );
-            return self.pause_opening(view.position, view.now_ms);
+            return self.pause_opening(self.position(view), view.now_ms);
         }
         if !paused && was_paused {
             tracing::info!(divergence_bps = %format!("{div:.1}"), "Trend filter cleared");

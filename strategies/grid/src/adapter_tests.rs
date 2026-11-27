@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use bb_strategy_sdk::testing::{Market, SimHost, exchange, on_bullet};
 use bb_strategy_sdk::{
-    Event, Intent, LimitsInForce, MarketFacts, NewOrder, Order, OrderBook, OrderResult,
-    OrderStatus, OrderType, Side, StrategyAdapter, Trade, View,
+    BULLET, Event, ExchangeIntent, ExchangeView, Intent, LimitsInForce, MarketEvent, MarketView,
+    NewOrder, Order, OrderBook, OrderResult, OrderStatus, OrderType, Side, StrategyAdapter, Trade,
 };
 use rust_decimal::Decimal;
 
@@ -13,6 +14,8 @@ use crate::adapter::GridStrategy;
 use crate::plan::HardLimits;
 
 const NOON: u64 = 1_794_398_400_000;
+/// The grid's market in these tests (`test_config`'s), on Bullet.
+const SYM: &str = "BTC-USD";
 
 fn d(s: &str) -> Decimal {
     s.parse().unwrap()
@@ -53,29 +56,53 @@ fn mid_book() -> OrderBook {
     book("75.4", "75.6")
 }
 
-fn view<'a>(book: Option<&'a OrderBook>, open: &'a [Order], now_ms: u64) -> View<'a> {
+fn view(book: Option<&OrderBook>, open: &[Order], now_ms: u64) -> Market {
     at(book, open, now_ms, Decimal::ZERO)
 }
 
-fn at<'a>(book: Option<&'a OrderBook>, open: &'a [Order], now_ms: u64, pos: Decimal) -> View<'a> {
-    View {
-        now_ms,
-        symbol: "BTC-USD",
-        book,
-        position: pos,
-        avg_entry: None,
-        realized_pnl: Decimal::ZERO,
-        open_orders: Some(open),
-        positions: Some(&[]),
-        reconnected: false,
-        venue_halt: None,
-        path_stop: None,
-        read_started_ms: None,
-        limits: None,
-        stop: None,
-        market: MarketFacts::default(),
-        legs: &[],
-    }
+/// The grid's market on Bullet with `book` and the position `pos`; the venue lists `open` and no
+/// positions.
+fn at(book: Option<&OrderBook>, open: &[Order], now_ms: u64, pos: Decimal) -> Market {
+    let market =
+        MarketView { book: book.cloned().map(Arc::new), position: pos, ..MarketView::new(SYM) };
+    let bullet = ExchangeView {
+        open_orders: Some(open.to_vec()),
+        positions: Some(Vec::new()),
+        ..exchange(BULLET, vec![market])
+    };
+    Market::of(now_ms, vec![bullet])
+}
+
+/// The same market with no venue read: nothing listed, no positions.
+fn unread(mut market: Market) -> Market {
+    let bullet = market.bullet_mut().unwrap();
+    bullet.open_orders = None;
+    bullet.positions = None;
+    market
+}
+
+fn book_event() -> Event {
+    on_bullet(SYM, MarketEvent::Book)
+}
+
+fn fill_event(trade: Trade) -> Event {
+    on_bullet(SYM, MarketEvent::Fill(trade))
+}
+
+fn order_event(order: Order) -> Event {
+    on_bullet(SYM, MarketEvent::Order(order))
+}
+
+fn place(order: NewOrder) -> Intent {
+    Intent::on(BULLET, ExchangeIntent::Place(order))
+}
+
+fn cancel_all() -> Intent {
+    Intent::on(BULLET, ExchangeIntent::CancelAll(Some(SYM.into())))
+}
+
+fn cancel_own() -> Intent {
+    Intent::on(BULLET, ExchangeIntent::CancelOwn(Some(SYM.into())))
 }
 
 fn trade(client_id: Option<&str>, side: Side, price: &str) -> Trade {
@@ -93,13 +120,16 @@ fn trade(client_id: Option<&str>, side: Side, price: &str) -> Trade {
 }
 
 fn placements(intents: &[Intent]) -> Vec<&NewOrder> {
-    intents.iter().filter_map(|i| if let Intent::Place(o) = i { Some(o) } else { None }).collect()
+    bb_strategy_sdk::testing::placed(intents)
 }
 
 fn cancels(intents: &[Intent]) -> Vec<String> {
     intents
         .iter()
-        .filter_map(|i| if let Intent::Cancel(c) = i { c.client_id.clone() } else { None })
+        .filter_map(|i| match i {
+            Intent::On { intent: ExchangeIntent::Cancel(c), .. } => c.client_id.clone(),
+            _ => None,
+        })
         .collect()
 }
 
@@ -110,7 +140,7 @@ fn acked(order: &NewOrder) -> Event {
         success: true,
         error: None,
     };
-    Event::Outcome { intent: Intent::Place(order.clone()), result }
+    Event::Outcome { intent: place(order.clone()), result }
 }
 
 fn cancelled(client_id: &str) -> Order {
@@ -148,10 +178,10 @@ fn running(cfg: GridConfig) -> (GridStrategy, Vec<NewOrder>) {
 }
 
 fn running_on(mut grid: GridStrategy, b: &OrderBook) -> (GridStrategy, Vec<NewOrder>) {
-    let intents = grid.start(&view(Some(b), &[], NOON)).unwrap();
+    let intents = grid.start(&view(Some(b), &[], NOON).view()).unwrap();
     let orders: Vec<NewOrder> = placements(&intents).into_iter().cloned().collect();
     for order in &orders {
-        grid.on_event(&acked(order), &view(Some(b), &[], NOON));
+        grid.on_event(&acked(order), &view(Some(b), &[], NOON).view());
     }
     (grid, orders)
 }
@@ -167,8 +197,8 @@ fn resting(orders: &[NewOrder]) -> Vec<Order> {
 /// The orders `intents` placed, each answered unknown (the venue left the call unanswered).
 fn unknown_all(grid: &mut GridStrategy, intents: &[Intent], b: &OrderBook) {
     for order in placements(intents) {
-        let unknown = Event::Unknown { intent: Intent::Place(order.clone()), error: "t".into() };
-        grid.on_event(&unknown, &view(Some(b), &[], NOON));
+        let unknown = Event::Unknown { intent: place(order.clone()), error: "t".into() };
+        grid.on_event(&unknown, &view(Some(b), &[], NOON).view());
     }
 }
 
@@ -179,8 +209,8 @@ fn prices_of(intents: &[Intent], side: Side) -> Vec<String> {
 #[test]
 fn unmatched_trade_is_ignored() {
     let (mut grid, _) = running(test_config());
-    let event = Event::Fill(trade(Some("unknown"), Side::Buy, "75"));
-    assert!(grid.on_event(&event, &view(Some(&mid_book()), &[], NOON)).is_empty());
+    let event = fill_event(trade(Some("unknown"), Side::Buy, "75"));
+    assert!(grid.on_event(&event, &view(Some(&mid_book()), &[], NOON).view()).is_empty());
 }
 
 #[test]
@@ -188,7 +218,8 @@ fn lifecycle_cancelled_flips_active_to_pending() {
     let (mut grid, orders) = running(test_config());
     assert!(levels(&grid).iter().all(|(state, _)| state == "Active"));
     let cid = orders[2].client_id.clone().unwrap();
-    let out = grid.on_event(&Event::Order(cancelled(&cid)), &view(Some(&mid_book()), &[], NOON));
+    let out =
+        grid.on_event(&order_event(cancelled(&cid)), &view(Some(&mid_book()), &[], NOON).view());
     assert!(out.is_empty(), "the tick re-places, not the event: {out:?}");
     assert_eq!(levels(&grid)[2], ("Pending".to_string(), false));
     assert_eq!(levels(&grid)[1].0, "Active");
@@ -199,9 +230,9 @@ fn lifecycle_cancelled_noop_when_already_pending() {
     // The placement went out but its answer is not back: the level is Pending with its client id.
     let mut grid = GridStrategy::new(test_config());
     let b = mid_book();
-    let intents = grid.start(&view(Some(&b), &[], NOON)).unwrap();
+    let intents = grid.start(&view(Some(&b), &[], NOON).view()).unwrap();
     let cid = placements(&intents)[1].client_id.clone().unwrap();
-    grid.on_event(&Event::Order(cancelled(&cid)), &view(Some(&b), &[], NOON));
+    grid.on_event(&order_event(cancelled(&cid)), &view(Some(&b), &[], NOON).view());
     assert_eq!(levels(&grid)[1], ("Pending".to_string(), true));
 }
 
@@ -215,7 +246,7 @@ fn a_post_only_level_that_would_cross_goes_at_the_touch() {
         with(test_config(), serde_json::json!({ "order_type": "post_only", "anchor_price": "76" }));
     let mut grid = GridStrategy::new(cfg);
     let b = book("74.8", "74.9");
-    let intents = grid.start(&view(Some(&b), &[], NOON)).unwrap();
+    let intents = grid.start(&view(Some(&b), &[], NOON).view()).unwrap();
     let sent: Vec<(Side, String)> =
         placements(&intents).iter().map(|o| (o.side, o.price.to_string())).collect();
     let want = [(Side::Buy, "74"), (Side::Buy, "74.8"), (Side::Sell, "77"), (Side::Sell, "78")];
@@ -229,7 +260,7 @@ fn the_level_nearest_the_mid_is_left_empty() {
     let cfg = with(test_config(), serde_json::json!({ "anchor_price": null }));
     let mut grid = GridStrategy::new(cfg);
     let b = book("75.9", "76.1");
-    let intents = grid.start(&view(Some(&b), &[], NOON)).unwrap();
+    let intents = grid.start(&view(Some(&b), &[], NOON).view()).unwrap();
     let prices: Vec<String> = placements(&intents).iter().map(|o| o.price.to_string()).collect();
     assert_eq!(prices, ["74", "75", "77", "78"], "76 is the mid's level");
 }
@@ -237,7 +268,7 @@ fn the_level_nearest_the_mid_is_left_empty() {
 #[test]
 fn a_tick_replaces_a_level_the_venue_no_longer_shows() {
     let (mut grid, _) = running(test_config());
-    let out = grid.on_event(&Event::Tick, &view(Some(&mid_book()), &[], NOON + 3_000));
+    let out = grid.on_event(&Event::Tick, &view(Some(&mid_book()), &[], NOON + 3_000).view());
     // A read past the settle margin lists nothing, so all five levels come back and are placed
     // again.
     assert_eq!(placements(&out).len(), 5);
@@ -246,25 +277,36 @@ fn a_tick_replaces_a_level_the_venue_no_longer_shows() {
 #[test]
 fn stop_cancels_everything() {
     let mut grid = GridStrategy::new(test_config());
-    assert!(matches!(grid.stop(&view(None, &[], NOON)).as_slice(), [Intent::CancelAll]));
+    assert_eq!(grid.stop(&view(None, &[], NOON).view()), [cancel_all()]);
 }
 
 #[test]
 fn start_refuses_a_config_it_cannot_run() {
     let cfg = with(test_config(), serde_json::json!({ "num_levels": 1 }));
-    assert!(GridStrategy::new(cfg).start(&view(Some(&mid_book()), &[], NOON)).is_err());
+    assert!(GridStrategy::new(cfg).start(&view(Some(&mid_book()), &[], NOON).view()).is_err());
 }
 
 #[test]
 fn start_needs_a_book() {
-    assert!(GridStrategy::new(test_config()).start(&view(None, &[], NOON)).is_err());
+    assert!(GridStrategy::new(test_config()).start(&view(None, &[], NOON).view()).is_err());
+}
+
+/// The grid trades its own symbol: a Bullet that shows another market is not a start.
+#[test]
+fn start_refuses_without_its_market_on_bullet() {
+    let other = Market::new("ETH-USD", "75.4", "75.6", NOON);
+    let mut sim = SimHost::new(GridStrategy::new(test_config()), other);
+    assert!(sim.start().unwrap_err().0.contains("no BTC-USD market"));
+    assert_eq!(sim.sent, Vec::new(), "nothing sent");
 }
 
 /// The grid starts from no position: one already on the account would sit outside its worst case.
 #[test]
 fn start_refuses_a_position_already_held() {
     let b = mid_book();
-    let e = GridStrategy::new(test_config()).start(&at(Some(&b), &[], NOON, d("0.5"))).unwrap_err();
+    let e = GridStrategy::new(test_config())
+        .start(&at(Some(&b), &[], NOON, d("0.5")).view())
+        .unwrap_err();
     assert!(e.0.contains("already holds 0.5"), "{e}");
 }
 
@@ -275,15 +317,21 @@ fn start_refuses_a_worst_case_past_the_hard_limits() {
     // Sells 76, 77, 78 of 1 each: a short worst case of 3 coins, $231.
     let b = mid_book();
     let tight = HardLimits { max_position: Some(d("2")), max_notional_usd: None };
-    let e = GridStrategy::new(test_config()).with_limits(tight).start(&view(Some(&b), &[], NOON));
+    let e = GridStrategy::new(test_config())
+        .with_limits(tight)
+        .start(&view(Some(&b), &[], NOON).view());
     assert!(e.unwrap_err().0.contains("position limit 2"));
     let poor = HardLimits { max_position: None, max_notional_usd: Some(d("230")) };
-    let e = GridStrategy::new(test_config()).with_limits(poor).start(&view(Some(&b), &[], NOON));
+    let e =
+        GridStrategy::new(test_config()).with_limits(poor).start(&view(Some(&b), &[], NOON).view());
     assert!(e.unwrap_err().0.contains("notional limit $230"));
     let mine = with(test_config(), serde_json::json!({ "amount_usd": "200" }));
-    assert!(GridStrategy::new(mine).start(&view(Some(&b), &[], NOON)).is_err());
+    assert!(GridStrategy::new(mine).start(&view(Some(&b), &[], NOON).view()).is_err());
     let fits = HardLimits { max_position: Some(d("3")), max_notional_usd: Some(d("231")) };
-    GridStrategy::new(test_config()).with_limits(fits).start(&view(Some(&b), &[], NOON)).unwrap();
+    GridStrategy::new(test_config())
+        .with_limits(fits)
+        .start(&view(Some(&b), &[], NOON).view())
+        .unwrap();
 }
 
 /// The limits the host holds the path to, shown in the view, refuse the same plans as the build's;
@@ -296,7 +344,7 @@ fn the_limits_in_the_view_refuse_a_worst_case_past_them_as_the_builds_do() {
         if let Some(built) = built {
             grid = grid.with_limits(built);
         }
-        grid.start(&View { limits: Some(limits), ..view(Some(&b), &[], NOON) })
+        grid.start(&Market { limits: Some(limits), ..view(Some(&b), &[], NOON) }.view())
     };
     let tight = LimitsInForce::new(d("2"), d("50"), None);
     assert!(start(tight.clone(), None).unwrap_err().0.contains("position limit 2"));
@@ -320,12 +368,11 @@ fn the_limits_in_the_view_refuse_a_worst_case_past_them_as_the_builds_do() {
 fn the_report_shows_realized_and_unrealized_of_the_whole_position() {
     let (mut grid, _) = running(test_config());
     let b = book("74.9", "75.1");
-    let v = View {
-        avg_entry: Some(d("76")),
-        realized_pnl: d("1.5"),
-        ..at(Some(&b), &[], NOON, d("2"))
-    };
-    grid.on_event(&Event::Book, &v);
+    let mut v = at(Some(&b), &[], NOON, d("2"));
+    let market = v.main_mut().unwrap();
+    market.avg_entry = Some(d("76"));
+    market.realized_pnl = d("1.5");
+    grid.on_event(&book_event(), &v.view());
     let pnl = &report(&grid)["pnl"];
     // Long 2 from 76 at a mid of 75: -2 open, +1.5 closed.
     assert_eq!((pnl["realized"].as_str(), pnl["unrealized"].as_str()), (Some("1.5"), Some("-2")));
@@ -339,7 +386,7 @@ fn a_fee_floor_past_decimal_max_refuses_the_start_not_a_panic() {
         "maker_bps": "1000", "min_spacing_fee_multiplier": "100000000000000000000000000"
     });
     let mut grid = GridStrategy::new(with(test_config(), serde_json::json!({ "fees": fees })));
-    let e = grid.start(&view(Some(&mid_book()), &[], NOON)).unwrap_err();
+    let e = grid.start(&view(Some(&mid_book()), &[], NOON).view()).unwrap_err();
     assert!(e.0.contains("min_spacing_fee_multiplier"), "{e:?}");
     let market = crate::plan::Market { mid: d("75.5"), tick: None, lot: None };
     let plan = crate::plan::resolve(&grid.config, market, None, HardLimits::default()).unwrap();

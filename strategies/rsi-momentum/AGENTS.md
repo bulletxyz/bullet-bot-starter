@@ -8,13 +8,13 @@ and returns them as intents. The bot's host owns the position (from fills; taken
 the host's confirm ticks of disagreement), the order path's limits, the paper broker (the same one the grid uses),
 the one daily loss stop every strategy has, and a wind-down that reads the venue, runs the strategy's close, then
 the host's own close until the venue reads flat. The strategy keeps the venue's position as the host last read it
-(`View::positions`, at start and each tick; unknown after a fill or a tick with no read) and sizes and ends its
+(Bullet's `ExchangeView::positions`, at start and each tick; unknown after a fill or a tick with no read) and sizes and ends its
 closes on it. Under `keep_position` (the default) a process shutdown leaves the long or short open unless a close is
 under way; the next start takes it over: the host seeds it and the stop and exit watch it as their own.
 
 ## Rules (the strategy's own)
 
-- **Candles** (`indicator/candles.rs`): built from `Event::Mark` (the venue's mark price the host delivers),
+- **Candles** (`indicator/candles.rs`): built from `MarketEvent::Mark` (the venue's mark price the host delivers),
   bucketed by the host's clock. A candle closes on the next mark in a later bucket. The first RSI
   needs `rsi_period + 1` closed candles, an entry one more (a cross).
 - **Warm-up** (`history`, `warm_up` in `adapter.rs`): the host loads up to ten times `rsi_period + 1` past

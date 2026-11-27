@@ -17,3 +17,6 @@ doctest = false
 bb-strategy-sdk = { workspace = true }
 rust_decimal = { workspace = true }
 serde = { workspace = true }
+
+[dev-dependencies]
+bb-strategy-sdk = { workspace = true, features = ["testing"] }

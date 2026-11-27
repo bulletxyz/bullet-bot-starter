@@ -20,10 +20,10 @@
 )]
 
 use bb_strategy_sdk::{
-    Alert, Event, HistoryNeed, Intent, MAX_HISTORY_CANDLES, StrategyAdapter, StrategyError, View,
-    Warmup,
+    Alert, BULLET, Event, ExchangeIntent, HistoryNeed, Intent, MAX_HISTORY_CANDLES, MarketEvent,
+    MarketView, StrategyAdapter, StrategyError, View, Warmup,
 };
-use bb_strategy_sdk::{NewOrder, OrderType, Protection, Side, signed_position};
+use bb_strategy_sdk::{NewOrder, OrderType, Protection, Side};
 use bb_strategy_support::ClientIdIssuer;
 use bb_strategy_support::ioc::{capped_ioc_price, two_sided_mid, within_bps};
 use bb_strategy_support::{close_reference, touch};
@@ -95,15 +95,48 @@ impl RsiMomentum {
         self.mark.filter(|(_, at)| now_ms.saturating_sub(*at) <= limit).map(|(m, _)| m)
     }
 
-    /// The venue's position as the host last read it (`View::positions`: the start's and a tick's
-    /// read), kept until a fill or a tick that did not read it; and when the last book came.
+    /// Its market as the host shows it: `symbol` on Bullet.
+    fn market<'v>(&self, view: &'v View<'_>) -> Option<&'v MarketView> {
+        view.market(BULLET, &self.config.symbol)
+    }
+
+    /// The host's position in its market (zero when the market is not shown).
+    fn position(&self, view: &View<'_>) -> Decimal {
+        self.market(view).map_or(Decimal::ZERO, |m| m.position)
+    }
+
+    fn avg_entry(&self, view: &View<'_>) -> Option<Decimal> {
+        self.market(view).and_then(|m| m.avg_entry)
+    }
+
+    /// Bullet's signed position in its market from the host's last read; `None` while unread.
+    fn venue_read(&self, view: &View<'_>) -> Option<Decimal> {
+        view.exchange(BULLET).and_then(|e| e.venue_position(&self.config.symbol))
+    }
+
+    /// The event if it is on its market (Bullet, `symbol`).
+    fn ours<'e>(&self, event: &'e Event) -> Option<&'e MarketEvent> {
+        match event {
+            Event::Market { exchange, symbol, event }
+                if exchange == BULLET && *symbol == self.config.symbol =>
+            {
+                Some(event)
+            }
+            _ => None,
+        }
+    }
+
+    /// The venue's position as the host last read it (`ExchangeView::positions`: the start's and a
+    /// tick's read), kept until a fill or a tick that did not read it; and when the last book came.
     fn observe(&mut self, event: &Event, view: &View<'_>) {
-        match (event, view.positions) {
-            (_, Some(positions)) => self.venue = Some(signed_position(positions, view.symbol)),
-            (Event::Fill(_) | Event::Tick, None) => self.venue = None,
+        let ours = self.ours(event);
+        match (ours, self.venue_read(view)) {
+            (_, Some(read)) => self.venue = Some(read),
+            (Some(MarketEvent::Fill(_)), None) => self.venue = None,
+            (None, None) if matches!(event, Event::Tick) => self.venue = None,
             _ => {}
         }
-        if matches!(event, Event::Book) {
+        if matches!(ours, Some(MarketEvent::Book)) {
             self.book_ms = Some(view.now_ms);
         }
     }
@@ -111,11 +144,11 @@ impl RsiMomentum {
     /// The position a close is sized and ended on: the venue's as the host last read it, else the
     /// host's.
     fn held(&self, view: &View<'_>) -> Decimal {
-        self.venue.unwrap_or(view.position)
+        self.venue.unwrap_or_else(|| self.position(view))
     }
 
-    fn held_side(view: &View<'_>) -> Option<Side> {
-        match view.position.cmp(&Decimal::ZERO) {
+    fn held_side(&self, view: &View<'_>) -> Option<Side> {
+        match self.position(view).cmp(&Decimal::ZERO) {
             std::cmp::Ordering::Greater => Some(Side::Buy),
             std::cmp::Ordering::Less => Some(Side::Sell),
             std::cmp::Ordering::Equal => None,
@@ -175,7 +208,7 @@ impl RsiMomentum {
         let rsi = self.rsi.push(closed.candle.close);
         self.last_rsi = rsi;
         tracing::debug!(close = %closed.candle.close, ?rsi, ?prev, "rsi-momentum: candle closed");
-        match decide::on_close(&self.config.params(), prev, rsi, Self::held_side(view), cooldown) {
+        match decide::on_close(&self.config.params(), prev, rsi, self.held_side(view), cooldown) {
             Signal::Enter(side) => self.enter(side, view),
             Signal::Exit => self.start_close(view),
             Signal::Hold => Vec::new(),
@@ -188,8 +221,8 @@ impl RsiMomentum {
         if self.closing.is_some() {
             return Vec::new();
         }
-        let Some(side) = Self::held_side(view) else { return Vec::new() };
-        let entry = view.avg_entry.unwrap_or(Decimal::ZERO);
+        let Some(side) = self.held_side(view) else { return Vec::new() };
+        let entry = self.avg_entry(view).unwrap_or(Decimal::ZERO);
         if !decide::stop_hit(side, entry, price, self.config.stop_loss_pct) {
             return Vec::new();
         }
@@ -203,7 +236,7 @@ impl RsiMomentum {
             Some("a close is under way")
         } else if self.entry_sent_ms.is_some() {
             Some("an entry is in flight")
-        } else if !view.position.is_zero() {
+        } else if !self.position(view).is_zero() {
             Some("not flat")
         } else if self.venue != Some(Decimal::ZERO) {
             // A missed Trade, a manual trade, or a venue the tick could not read: not flat.
@@ -220,7 +253,7 @@ impl RsiMomentum {
             tracing::info!(%side, why, "rsi-momentum: entry signal skipped");
             return Vec::new();
         }
-        let step = view.market.step_size.filter(|s| *s > Decimal::ZERO);
+        let step = self.market(view).and_then(|m| m.facts.step_size).filter(|s| *s > Decimal::ZERO);
         let (Some(mark), Some(step)) = (self.fresh_mark(view.now_ms), step) else {
             tracing::warn!("rsi-momentum: no fresh mark or no size step, no entry");
             return Vec::new();
@@ -231,7 +264,7 @@ impl RsiMomentum {
             tracing::warn!(%mark, %step, "rsi-momentum: entry below one step, skipped");
             return Vec::new();
         }
-        let Some(book) = view.book else {
+        let Some(book) = self.market(view).and_then(MarketView::book) else {
             tracing::warn!("rsi-momentum: no book, no entry");
             return Vec::new();
         };
@@ -247,19 +280,22 @@ impl RsiMomentum {
             return Vec::new();
         };
         self.entry_sent_ms = Some(view.now_ms);
-        vec![Intent::Place(NewOrder {
-            // The venue holds the stop from the first fill (the host keeps it at the entry price
-            // after).
-            protect: decide::stop_price(side, mark, self.config.stop_loss_pct)
-                .map(Protection::stop_at),
-            symbol: view.symbol.to_string(),
-            side,
-            order_type: OrderType::Market,
-            price,
-            quantity: qty,
-            client_id: Some(self.client_ids.issue()),
-            reduce_only: false,
-        })]
+        vec![Intent::on(
+            BULLET,
+            ExchangeIntent::Place(NewOrder {
+                // The venue holds the stop from the first fill (the host keeps it at the entry price
+                // after).
+                protect: decide::stop_price(side, mark, self.config.stop_loss_pct)
+                    .map(Protection::stop_at),
+                symbol: self.config.symbol.clone(),
+                side,
+                order_type: OrderType::Market,
+                price,
+                quantity: qty,
+                client_id: Some(self.client_ids.issue()),
+                reduce_only: false,
+            }),
+        )]
     }
 
     fn start_close(&mut self, view: &View<'_>) -> Vec<Intent> {
@@ -306,11 +342,12 @@ impl RsiMomentum {
         let stale_ms = self.config.stale_secs.saturating_mul(1_000);
         let fresh = self.fresh_mark(view.now_ms);
         let age = self.book_ms.map(|at| view.now_ms.saturating_sub(at));
+        let book = self.market(view).and_then(MarketView::book);
         let (reference, base) = if let Some(rb) =
-            close_reference(view.book, age, side, fresh, stale_ms, MAX_IOC_BPS_FROM_MID)
+            close_reference(book, age, side, fresh, stale_ms, MAX_IOC_BPS_FROM_MID)
         {
             rb
-        } else if let Some(m) = view.avg_entry {
+        } else if let Some(m) = self.avg_entry(view) {
             (m, m)
         } else {
             tracing::error!("rsi-momentum: no book, mark or entry price to cap a close on");
@@ -318,16 +355,19 @@ impl RsiMomentum {
         };
         let slip = self.config.slippage_bps.checked_mul(mult)?;
         let price = capped_ioc_price(side, base, reference, slip, MAX_IOC_BPS_FROM_MID)?;
-        Some(Intent::Place(NewOrder {
-            protect: None,
-            symbol: view.symbol.to_string(),
-            side,
-            order_type: OrderType::Market,
-            price,
-            quantity: held.abs(),
-            client_id: Some(self.client_ids.issue()),
-            reduce_only: true,
-        }))
+        Some(Intent::on(
+            BULLET,
+            ExchangeIntent::Place(NewOrder {
+                protect: None,
+                symbol: self.config.symbol.clone(),
+                side,
+                order_type: OrderType::Market,
+                price,
+                quantity: held.abs(),
+                client_id: Some(self.client_ids.issue()),
+                reduce_only: true,
+            }),
+        ))
     }
 
     fn on_tick(&mut self, view: &View<'_>) -> Vec<Intent> {
@@ -347,8 +387,14 @@ impl StrategyAdapter for RsiMomentum {
     type Report = RsiReport;
 
     fn start(&mut self, view: &View<'_>) -> Result<Vec<Intent>, StrategyError> {
-        if view.market.step_size.is_none() {
-            tracing::warn!(symbol = view.symbol, "rsi-momentum: the venue gives no size step yet");
+        let Some(market) = self.market(view) else {
+            return Err(StrategyError(format!(
+                "The host shows no {} market on {BULLET}: rsi-momentum trades only that one.",
+                self.config.symbol
+            )));
+        };
+        if market.facts.step_size.is_none() {
+            tracing::warn!(symbol = %self.config.symbol, "rsi-momentum: the venue gives no size step yet");
         }
         tracing::info!(
             symbol = %self.config.symbol,
@@ -356,9 +402,9 @@ impl StrategyAdapter for RsiMomentum {
             rsi_period = self.config.rsi_period,
             "rsi-momentum: ready, warming up"
         );
-        self.book_ms = view.book.map(|_| view.now_ms);
-        if let Some(positions) = view.positions {
-            self.venue = Some(signed_position(positions, view.symbol));
+        self.book_ms = market.book().map(|_| view.now_ms);
+        if let Some(read) = self.venue_read(view) {
+            self.venue = Some(read);
         }
         // What an earlier run left raised for the owner: this start (their resume) acknowledges it.
         Ok(vec![Intent::Notify(Alert::Resolve { key: ALERT_CLOSE.into() })])
@@ -366,16 +412,20 @@ impl StrategyAdapter for RsiMomentum {
 
     fn on_event(&mut self, event: &Event, view: &View<'_>) -> Vec<Intent> {
         self.observe(event, view);
-        match event {
-            Event::Mark(price) => self.on_mark(*price, view),
-            Event::Fill(_) => {
+        match (self.ours(event), event) {
+            (Some(MarketEvent::Mark(price)), _) => self.on_mark(*price, view),
+            (Some(MarketEvent::Fill(_)), _) => {
                 self.entry_sent_ms = None;
                 Vec::new()
             }
-            Event::Tick => self.on_tick(view),
-            Event::Outcome { intent: Intent::Place(order), result }
-                if !result.success && !order.reduce_only =>
-            {
+            (_, Event::Tick) => self.on_tick(view),
+            (
+                _,
+                Event::Outcome {
+                    intent: Intent::On { intent: ExchangeIntent::Place(order), .. },
+                    result,
+                },
+            ) if !result.success && !order.reduce_only => {
                 tracing::warn!(error = ?result.error, "rsi-momentum: entry not taken");
                 self.entry_sent_ms = None;
                 Vec::new()
@@ -392,8 +442,8 @@ impl StrategyAdapter for RsiMomentum {
     fn stop(&mut self, view: &View<'_>) -> Vec<Intent> {
         tracing::info!("rsi-momentum: winding down, flattening");
         self.closing = None;
-        if let Some(positions) = view.positions {
-            self.venue = Some(signed_position(positions, view.symbol));
+        if let Some(read) = self.venue_read(view) {
+            self.venue = Some(read);
         }
         if self.held(view).is_zero() {
             return Vec::new();
@@ -403,8 +453,8 @@ impl StrategyAdapter for RsiMomentum {
 
     /// The stop loss, from the entry: the venue holds it while the bot is down.
     fn protective_stop(&self, view: &View<'_>) -> Option<Protection> {
-        let side = Self::held_side(view)?;
-        decide::stop_price(side, view.avg_entry?, self.config.stop_loss_pct)
+        let side = self.held_side(view)?;
+        decide::stop_price(side, self.avg_entry(view)?, self.config.stop_loss_pct)
             .map(Protection::stop_at)
     }
 

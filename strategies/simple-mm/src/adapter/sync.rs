@@ -2,7 +2,9 @@
 //! venue reads that settle a quote whose answer was lost. A quote is a slot only while the market
 //! maker knows it rests (or may, its place unknown); one that may rest but is no slot is a stray.
 
-use bb_strategy_sdk::{AmendOrder, CancelOrder, Intent, Order, OrderResult, OrderStatus, View};
+use bb_strategy_sdk::{
+    AmendOrder, CancelOrder, ExchangeIntent, Intent, Order, OrderResult, OrderStatus, View,
+};
 
 use super::{InFlight, MarketMaker, SETTLE_MS, Slot, Stray, side_index};
 
@@ -12,9 +14,12 @@ fn cancel_key(c: &CancelOrder) -> String {
 
 /// The key an intent and its answer share: the client id of what it places, or what it cancels.
 fn key_of(intent: &Intent) -> Option<String> {
+    let Intent::On { intent, .. } = intent else { return None };
     match intent {
-        Intent::Place(o) | Intent::Amend(AmendOrder { new_order: o, .. }) => o.client_id.clone(),
-        Intent::Cancel(c) => Some(cancel_key(c)),
+        ExchangeIntent::Place(o) | ExchangeIntent::Amend(AmendOrder { new_order: o, .. }) => {
+            o.client_id.clone()
+        }
+        ExchangeIntent::Cancel(c) => Some(cancel_key(c)),
         _ => None,
     }
 }
@@ -61,12 +66,12 @@ impl MarketMaker {
         view: &View<'_>,
     ) -> Vec<Intent> {
         let now_ms = view.now_ms;
-        if matches!(intent, Intent::CancelOwn) {
+        if matches!(intent, Intent::On { intent: ExchangeIntent::CancelOwn(_), .. }) {
             return self.pulled(result.success, view);
         }
         let Some(flight) = self.take_in_flight(intent) else {
             // A cancel no slot waits for: the old order of an amend whose cancel failed beside it.
-            if let Intent::Cancel(c) = intent
+            if let Intent::On { intent: ExchangeIntent::Cancel(c), .. } = intent
                 && !result.success
             {
                 self.add_stray(c.clone(), now_ms);
@@ -112,8 +117,10 @@ impl MarketMaker {
     /// is as it was.
     pub(crate) fn on_failed(&mut self, intent: &Intent, view: &View<'_>) -> Vec<Intent> {
         match intent {
-            Intent::CancelOwn => return self.pulled(false, view),
-            Intent::ClosePosition { id } => return self.close_failed(*id),
+            Intent::On { intent: ExchangeIntent::CancelOwn(_), .. } => {
+                return self.pulled(false, view);
+            }
+            Intent::ClosePosition { id, .. } => return self.close_failed(*id),
             _ => {}
         }
         match self.take_in_flight(intent) {
@@ -175,7 +182,7 @@ impl MarketMaker {
     /// [`SETTLE_MS`] after what it asks about.
     pub(crate) fn on_read(&mut self, open: &[Order], view: &View<'_>) {
         self.last_read_ms = Some(view.now_ms);
-        let Some(read) = view.read_started_ms else { return };
+        let Some(read) = Self::bullet(view).and_then(|e| e.read_started_ms) else { return };
         let listed =
             |c: &CancelOrder| open.iter().find(|o| names(c, &o.id, o.client_id.as_deref()));
         let settled = |since: u64| read >= since.saturating_add(SETTLE_MS);
@@ -206,13 +213,11 @@ impl MarketMaker {
         } else {
             self.pull.failed_ms = Some(view.now_ms);
         }
+        let held = self.position(view);
         self.pull
             .pause_reply
             .take()
-            .map(|id| Intent::Reply {
-                id,
-                reply: super::control::pause_reply(landed, view.position),
-            })
+            .map(|id| Intent::Reply { id, reply: super::control::pause_reply(landed, held) })
             .into_iter()
             .collect()
     }

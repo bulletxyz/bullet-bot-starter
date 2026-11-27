@@ -4,7 +4,9 @@
 
 #![expect(clippy::arithmetic_side_effects, reason = "Decimal prices and bps far below 7.9e28")]
 
-use bb_strategy_sdk::{AmendOrder, Intent, NewOrder, OrderBook, OrderType, Side, View};
+use bb_strategy_sdk::{
+    AmendOrder, ExchangeIntent, Intent, NewOrder, OrderBook, OrderType, Side, View,
+};
 use rust_decimal::Decimal;
 
 use super::{InFlight, MarketMaker, PULL_RETRY_MS, Slot, market_view, side_index};
@@ -16,7 +18,8 @@ const BPS_SCALE: i64 = 10_000;
 impl MarketMaker {
     pub(crate) fn on_book(&mut self, view: &View<'_>) -> Vec<Intent> {
         let caps = self.caps(view);
-        self.pricing.on_book(&market_view(&self.params, caps, self.tick, view));
+        let mv = market_view(&self.params, caps, self.tick, view, &self.settings.symbol);
+        self.pricing.on_book(&mv);
         self.refresh(view)
     }
 
@@ -30,7 +33,7 @@ impl MarketMaker {
     /// Quote, when due: nothing while stopped or without a two-sided book (what rests is pulled),
     /// nor while the last refresh's answers are not all in.
     pub(crate) fn refresh(&mut self, view: &View<'_>) -> Vec<Intent> {
-        if self.stopped(view) || view.book.and_then(OrderBook::midpoint).is_none() {
+        if self.stopped(view) || self.book(view).and_then(OrderBook::midpoint).is_none() {
             return self.pull_quotes(view, false);
         }
         if !self.in_flight.is_empty() || !self.due(view.now_ms) {
@@ -39,14 +42,15 @@ impl MarketMaker {
         self.last_refresh_ms = Some(view.now_ms);
         self.forced = false;
         let caps = self.caps(view);
-        let quotes = self.pricing.quote(&market_view(&self.params, caps, self.tick, view));
+        let mv = market_view(&self.params, caps, self.tick, view, &self.settings.symbol);
+        let quotes = self.pricing.quote(&mv);
         // An order that may still rest beside a slot is cancelled first, and nothing is placed
         // until it is gone: two orders on a side could fill past the cap.
         let strays = std::mem::take(&mut self.strays);
         let place_nothing = !strays.is_empty();
         let mut intents: Vec<Intent> = Vec::new();
         for stray in strays {
-            intents.push(Intent::Cancel(stray.cancel.clone()));
+            intents.push(Self::on_bullet(ExchangeIntent::Cancel(stray.cancel.clone())));
             self.in_flight.push(InFlight::Stray(stray));
         }
         for (side, wanted) in [(Side::Buy, quotes.bid), (Side::Sell, quotes.ask)] {
@@ -65,12 +69,13 @@ impl MarketMaker {
         place_nothing: bool,
     ) -> Option<Intent> {
         let post_only = self.settings.order_type == OrderType::PostOnly;
+        let (held, book) = (self.position(view), self.book(view));
         let quote = wanted
             .and_then(|q| {
-                let qty = caps.allowed(side, q.size, q.price, view.position)?;
+                let qty = caps.allowed(side, q.size, q.price, held)?;
                 Some(Quote { size: qty, ..q })
             })
-            .filter(|q| !(post_only && view.book.is_some_and(|b| b.would_cross(side, q.price))));
+            .filter(|q| !(post_only && book.is_some_and(|b| b.would_cross(side, q.price))));
         let slot = self.slots[side_index(side)].take();
         match (slot, quote) {
             (None, None) => None,
@@ -92,7 +97,7 @@ impl MarketMaker {
                 // the replacement past it. Either way the replacement waits for the cancel.
                 let one_message = slot.order_id.is_some()
                     && !slot.unknown
-                    && caps.passes_with_filled(side, q.size, q.price, view.position, slot.size);
+                    && caps.passes_with_filled(side, q.size, q.price, held, slot.size);
                 Some(if one_message { self.amend(slot, new) } else { self.cancel(slot, Some(new)) })
             }
         }
@@ -137,22 +142,22 @@ impl MarketMaker {
     }
 
     pub(crate) fn place(&mut self, slot: Slot) -> Intent {
-        let intent = Intent::Place(self.order(&slot));
+        let intent = Self::on_bullet(ExchangeIntent::Place(self.order(&slot)));
         self.in_flight.push(InFlight::Place(slot));
         intent
     }
 
     fn amend(&mut self, old: Slot, new: Slot) -> Intent {
-        let intent = Intent::Amend(AmendOrder {
+        let intent = Self::on_bullet(ExchangeIntent::Amend(AmendOrder {
             cancel: old.cancel(self.symbol()),
             new_order: self.order(&new),
-        });
+        }));
         self.in_flight.push(InFlight::Amend { old, new });
         intent
     }
 
     fn cancel(&mut self, slot: Slot, then: Option<Slot>) -> Intent {
-        let intent = Intent::Cancel(slot.cancel(self.symbol()));
+        let intent = Self::on_bullet(ExchangeIntent::Cancel(slot.cancel(self.symbol())));
         self.in_flight.push(InFlight::Cancel { slot, then });
         intent
     }
@@ -163,8 +168,8 @@ impl MarketMaker {
         if self.stopped(view) || !self.strays.is_empty() {
             return Vec::new();
         }
-        let Some(size) = self.caps(view).allowed(new.side, new.size, new.price, view.position)
-        else {
+        let held = self.position(view);
+        let Some(size) = self.caps(view).allowed(new.side, new.size, new.price, held) else {
             return Vec::new();
         };
         new.size = size;
@@ -185,6 +190,6 @@ impl MarketMaker {
             return Vec::new();
         }
         self.pull.asked = true;
-        vec![Intent::CancelOwn]
+        vec![self.cancel_own()]
     }
 }

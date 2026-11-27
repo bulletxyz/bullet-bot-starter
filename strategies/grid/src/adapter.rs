@@ -48,7 +48,9 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use bb_strategy_sdk::{CancelOrder, Intent, StrategyError};
+use bb_strategy_sdk::{
+    BULLET, CancelOrder, ExchangeIntent, Intent, MarketView, OrderBook, StrategyError, View,
+};
 use bb_strategy_support::ClientIdIssuer;
 use rust_decimal::Decimal;
 
@@ -203,6 +205,35 @@ impl GridStrategy {
         &self.config.symbol
     }
 
+    /// The grid's market as the host shows it: its `symbol` on Bullet. Every entry point checks it
+    /// is there before the rest reads it.
+    fn market<'v>(&self, view: &'v View<'_>) -> Option<&'v MarketView> {
+        view.market(BULLET, self.symbol())
+    }
+
+    fn position(&self, view: &View<'_>) -> Decimal {
+        self.market(view).map_or(Decimal::ZERO, |m| m.position)
+    }
+
+    fn book<'v>(&self, view: &'v View<'_>) -> Option<&'v OrderBook> {
+        self.market(view).and_then(MarketView::book)
+    }
+
+    /// `intent` on Bullet, where the grid's market is.
+    fn on_bullet(intent: ExchangeIntent) -> Intent {
+        Intent::on(BULLET, intent)
+    }
+
+    /// Every order on the grid's market goes, the owner's too: a safety stop's pull.
+    fn cancel_all(&self) -> Intent {
+        Self::on_bullet(ExchangeIntent::CancelAll(Some(self.symbol().to_string())))
+    }
+
+    /// Only the grid's own orders on its market go: a normal stop's pull.
+    fn cancel_own(&self) -> Intent {
+        Self::on_bullet(ExchangeIntent::CancelOwn(Some(self.symbol().to_string())))
+    }
+
     /// Refuse to start if the per-level spacing can't cover round-trip
     /// maker fees by the configured multiplier.
     fn check_fee_floor(&self, plan: &Plan) -> Result<(), StrategyError> {
@@ -254,11 +285,11 @@ impl GridStrategy {
         if l.state != LevelState::Active {
             return None;
         }
-        Some(Intent::Cancel(CancelOrder {
+        Some(Self::on_bullet(ExchangeIntent::Cancel(CancelOrder {
             symbol: self.symbol().to_string(),
             order_id: l.order_id.clone().unwrap_or_default(),
             client_id: l.client_id.clone(),
-        }))
+        })))
     }
 }
 

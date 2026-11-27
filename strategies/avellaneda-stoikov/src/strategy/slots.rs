@@ -1,7 +1,7 @@
 //! The ladder's bookkeeping: the slots the strategy believes rest on the venue, and the intents of
 //! a round still waiting for their answer.
 
-use bb_strategy_sdk::{AmendOrder, CancelOrder, Intent, NewOrder, Side};
+use bb_strategy_sdk::{AmendOrder, BULLET, CancelOrder, ExchangeIntent, Intent, NewOrder, Side};
 use rust_decimal::Decimal;
 
 /// One rung of the ladder as the strategy tracks it. `placed_at_ms` is the bot clock when the
@@ -46,12 +46,16 @@ fn cancel_key(order_id: &str, client_id: Option<&str>) -> String {
 
 /// The key of the answer to `intent`, when it is one of the ladder's own.
 pub(crate) fn key_of(intent: &Intent) -> Option<String> {
+    let Intent::On { exchange, intent } = intent else { return None };
+    if exchange != BULLET {
+        return None;
+    }
     match intent {
-        Intent::Place(o) => Some(o.client_id.clone().unwrap_or_default()),
-        Intent::Amend(AmendOrder { new_order, .. }) => {
+        ExchangeIntent::Place(o) => Some(o.client_id.clone().unwrap_or_default()),
+        ExchangeIntent::Amend(AmendOrder { new_order, .. }) => {
             Some(new_order.client_id.clone().unwrap_or_default())
         }
-        Intent::Cancel(CancelOrder { order_id, client_id, .. }) => {
+        ExchangeIntent::Cancel(CancelOrder { order_id, client_id, .. }) => {
             Some(cancel_key(order_id, client_id.as_deref()))
         }
         _ => None,

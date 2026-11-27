@@ -14,13 +14,14 @@ fn a_long_grid_above_its_range_cancels_its_buys_and_resumes_back_inside() {
     assert_eq!(buys.len(), 2);
     // Flat above 78: every resting order opens. The buys are cancelled.
     let above = book("78.5", "78.7");
-    let out = grid.on_event(&Event::Tick, &at(Some(&above), &[], NOON, Decimal::ZERO));
+    let out = grid.on_event(&Event::Tick, &at(Some(&above), &[], NOON, Decimal::ZERO).view());
     let gone = cancels(&out);
     assert!(buys.iter().all(|b| gone.contains(b)), "{gone:?} {buys:?}");
     assert!(placements(&out).is_empty(), "{out:?}");
     assert_eq!(report(&grid)["paused"], true);
     // Back inside: the paused levels are placed again.
-    let out = grid.on_event(&Event::Tick, &at(Some(&mid_book()), &[], NOON + 5_000, Decimal::ZERO));
+    let out = grid
+        .on_event(&Event::Tick, &at(Some(&mid_book()), &[], NOON + 5_000, Decimal::ZERO).view());
     let again: Vec<Side> = placements(&out).iter().map(|o| o.side).collect();
     assert!(again.iter().filter(|s| **s == Side::Buy).count() >= 2, "{again:?}");
     assert_eq!(report(&grid)["paused"], false);
@@ -33,11 +34,8 @@ fn below_the_range_but_above_the_stop_the_grid_holds() {
     // 73 is under the range (74) and over the stop (72): the losing side, held.
     let below = book("72.9", "73.1");
     let resting: Vec<Order> = Vec::new();
-    let out = grid.on_event(&Event::Tick, &at(Some(&below), &resting, NOON, d("5")));
-    assert!(
-        cancels(&out).is_empty() && !out.iter().any(|i| matches!(i, Intent::CancelAll)),
-        "{out:?}"
-    );
+    let out = grid.on_event(&Event::Tick, &at(Some(&below), &resting, NOON, d("5")).view());
+    assert!(cancels(&out).is_empty() && !out.iter().any(|i| *i == cancel_all()), "{out:?}");
     assert!(report(&grid)["stopped"].is_null());
     assert_eq!(report(&grid)["paused"], false);
 }
@@ -53,10 +51,10 @@ fn a_trend_filter_trip_cancels_the_opening_orders_and_keeps_the_closing_ones() {
     let (mut grid, orders) = running(cfg);
     let resting = resting(&orders);
     let calm = book("75.4", "75.6");
-    grid.on_event(&Event::Tick, &view(Some(&calm), &resting, NOON));
+    grid.on_event(&Event::Tick, &view(Some(&calm), &resting, NOON).view());
     // Long 1 (the buy at 75 filled): the sell at 76 closes it and stays; the rest are cancelled.
     let jump = book("76.9", "77.1");
-    let out = grid.on_event(&Event::Tick, &at(Some(&jump), &resting, NOON + 60_000, d("1")));
+    let out = grid.on_event(&Event::Tick, &at(Some(&jump), &resting, NOON + 60_000, d("1")).view());
     let gone = cancels(&out);
     let cid = |price: &str| {
         orders.iter().find(|o| o.price == d(price)).and_then(|o| o.client_id.clone()).unwrap()
@@ -65,7 +63,7 @@ fn a_trend_filter_trip_cancels_the_opening_orders_and_keeps_the_closing_ones() {
     for opening in ["74", "75", "77", "78"] {
         assert!(gone.contains(&cid(opening)), "{opening} cancelled: {gone:?}");
     }
-    assert!(!out.iter().any(|i| matches!(i, Intent::CancelAll)), "{out:?}");
+    assert!(!out.iter().any(|i| *i == cancel_all()), "{out:?}");
     assert_eq!(report(&grid)["paused"], true);
 }
 
@@ -79,7 +77,7 @@ fn trending_long() -> GridStrategy {
 }
 
 fn tick_buys(grid: &mut GridStrategy, b: &OrderBook, ms: u64) -> usize {
-    let out = grid.on_event(&Event::Tick, &at(Some(b), &[], ms, Decimal::ZERO));
+    let out = grid.on_event(&Event::Tick, &at(Some(b), &[], ms, Decimal::ZERO).view());
     placements(&out).iter().filter(|o| o.side == Side::Buy).count()
 }
 

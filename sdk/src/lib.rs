@@ -1,6 +1,6 @@
 //! The guest SDK for bullet-bots strategies. A strategy implements [`StrategyAdapter`] (data in,
 //! intents out), [`FromSettings`] and [`Describe`], and `export_strategy!(MyStrategy)` makes the
-//! crate a `bb:strategy@0.5.0` component when it is built for `wasm32-wasip2` (`crate-type =
+//! crate a `bb:strategy@0.6.0` component when it is built for `wasm32-wasip2` (`crate-type =
 //! ["cdylib", "rlib"]`). The same code runs natively in its own tests.
 //!
 //! Pure: no tokio, no I/O, no clock. This is the one port: the bot's own built-in strategies run on
@@ -38,20 +38,20 @@ pub use history::records::{
 pub use host::calls::{Answer, CallError, Cause, ReadQuery, VenueCall};
 pub use host::capability::{Alert, CloseReport, LimitsUpdate, Persist, ReferencePrice};
 pub use host::control::{ControlCmd, ControlReply, LimitChanges, SettingChanges};
-pub use host::legs::{LegView, TRADE_LEG};
+pub use host::exchanges::{BULLET, ExchangeView, MarketView};
 pub use rust_decimal::{Decimal, RoundingStrategy};
 pub use strategy::adapter::{
-    Event, FieldValue, FromSettings, Intent, LimitsInForce, MarketFacts, OwnBook, PaperInputs,
-    ReportField, SnapshotExtras, StartMode, StateRead, StrategyAdapter, StrategyError,
-    StrategyReport, View,
+    Event, ExchangeIntent, FieldValue, FromSettings, Intent, LimitsInForce, MarketEvent,
+    MarketFacts, OwnBook, PaperInputs, ReportField, SnapshotExtras, StartMode, StateRead,
+    StrategyAdapter, StrategyError, StrategyReport, View,
 };
 pub use strategy::describe::{
-    DEFAULT_RESYNC_TICKS, Describe, Descriptor, Feed, LegNeed, Loosening, Needs, Range,
+    DEFAULT_RESYNC_TICKS, Describe, Descriptor, ExchangeNeed, Feed, Loosening, Needs, Range,
     SettingKind, SettingSpec, Tier,
 };
 pub use strategy::erased::ErasedAdapter;
 pub use strategy::profile;
-pub use strategy::profile::{About, ExchangeNeed, Featured, Preset, Profile, Risk, RiskLevel};
+pub use strategy::profile::{About, ExchangeRole, Featured, Preset, Profile, Risk, RiskLevel};
 pub use strategy::report::{
     MAX_FIELD_NAME, MAX_FIELD_TEXT, MAX_FIELD_UNIT, MAX_HEADLINE, MAX_REPORT_FIELDS, fields_json,
     fields_of,
@@ -64,7 +64,7 @@ pub use types::{
 };
 
 /// The version of the `bb:strategy` world this SDK builds components for.
-pub const WORLD_VERSION: &str = "0.5.0";
+pub const WORLD_VERSION: &str = "0.6.0";
 
 /// The world's generated bindings (wit-bindgen over `wit/strategy.wit`).
 #[doc(hidden)]

@@ -15,62 +15,10 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use bb_strategy_sdk::testing::Market;
-use bb_strategy_sdk::{
-    Event, Intent, LimitsInForce, MarketFacts, Order, OrderBook, Position, StrategyAdapter,
-    StrategyError, StrategyReport,
-};
-use serde::Deserialize;
+use bb_strategy_sdk::{Event, Intent, StrategyAdapter, StrategyError, StrategyReport};
 use serde_json::Value;
 
-/// A view as the fixture holds it (bb-strategy's `View`, owned).
-#[derive(Debug, Clone, Deserialize)]
-struct ViewJson {
-    now_ms: u64,
-    symbol: String,
-    book: Option<OrderBook>,
-    position: bb_strategy_sdk::Decimal,
-    avg_entry: Option<bb_strategy_sdk::Decimal>,
-    realized_pnl: bb_strategy_sdk::Decimal,
-    open_orders: Option<Vec<Order>>,
-    positions: Option<Vec<Position>>,
-    reconnected: bool,
-    venue_halt: Option<String>,
-    path_stop: Option<String>,
-    read_started_ms: Option<u64>,
-    #[serde(default)]
-    limits: Option<LimitsInForce>,
-    #[serde(default)]
-    stop: Option<bb_strategy_sdk::stops::StopReason>,
-    market: MarketFacts,
-    #[serde(default)]
-    legs: Vec<Value>,
-}
-
-impl ViewJson {
-    fn market(self) -> Result<Market, String> {
-        if !self.legs.is_empty() {
-            return Err("a view with legs: not in these fixtures".into());
-        }
-        Ok(Market {
-            now_ms: self.now_ms,
-            symbol: self.symbol,
-            book: self.book,
-            position: self.position,
-            avg_entry: self.avg_entry,
-            realized_pnl: self.realized_pnl,
-            open_orders: self.open_orders,
-            positions: self.positions,
-            reconnected: self.reconnected,
-            venue_halt: self.venue_halt,
-            market: self.market,
-            legs: Vec::new(),
-            path_stop: self.path_stop,
-            read_started_ms: self.read_started_ms,
-            limits: self.limits,
-            stop: self.stop,
-        })
-    }
-}
+mod shape;
 
 /// What one fixture's replay found.
 #[derive(Debug, Default)]
@@ -184,18 +132,20 @@ fn field<'a>(line: &'a Value, name: &str, at: &str) -> Result<&'a Value, String>
     line.get(name).ok_or_else(|| format!("{at}: no `{name}`"))
 }
 
-fn view_of(line: &Value, ids: &Ids, at: &str) -> Result<Market, String> {
+/// The call's view in the SDK's shape, and its main market's symbol.
+fn view_of(line: &Value, ids: &Ids, at: &str) -> Result<(Market, String), String> {
     let mut view = field(line, "view", at)?.clone();
     ids.to_port(&mut view);
-    let view: ViewJson = serde_json::from_value(view).map_err(|e| format!("{at}: view: {e}"))?;
-    view.market().map_err(|e| format!("{at}: {e}"))
+    let view: shape::ViewJson =
+        serde_json::from_value(view).map_err(|e| format!("{at}: view: {e}"))?;
+    let symbol = view.symbol.clone();
+    Ok((view.market().map_err(|e| format!("{at}: {e}"))?, symbol))
 }
 
-fn intents_of<'a>(line: &'a Value, at: &str) -> Result<&'a [Value], String> {
-    field(line, "intents", at)?
-        .as_array()
-        .map(Vec::as_slice)
-        .ok_or_else(|| format!("{at}: intents"))
+/// The intents the built-in returned, in the SDK's shape.
+fn intents_of(line: &Value, symbol: &str, at: &str) -> Result<Vec<Value>, String> {
+    let intents = field(line, "intents", at)?.as_array().ok_or_else(|| format!("{at}: intents"))?;
+    Ok(intents.iter().map(|i| shape::intent(i, symbol)).collect())
 }
 
 fn check_headline<S: StrategyAdapter>(strategy: &S, line: &Value, at: &str, report: &mut Report) {
@@ -250,11 +200,11 @@ where
         match line["kind"].as_str() {
             Some("warm_up") => {}
             Some("start") => {
-                let market = view_of(line, &ids, &at)?;
+                let (market, symbol) = view_of(line, &ids, &at)?;
                 report.calls = report.calls.saturating_add(1);
                 match (strategy.start(&market.view()), line.get("error")) {
                     (Ok(got), None) => {
-                        compare(&at, intents_of(line, &at)?, &got, &mut ids, &mut report);
+                        compare(&at, &intents_of(line, &symbol, &at)?, &got, &mut ids, &mut report);
                     }
                     (Err(_), Some(_)) => {}
                     (Ok(got), Some(want)) => report.mismatches.push(format!(
@@ -268,21 +218,21 @@ where
                 check_headline(&strategy, line, &at, &mut report);
             }
             Some("event") => {
-                let mut event = field(line, "event", &at)?.clone();
+                let (market, symbol) = view_of(line, &ids, &at)?;
+                let mut event = shape::event(field(line, "event", &at)?, &symbol);
                 ids.to_port(&mut event);
                 let event: Event =
                     serde_json::from_value(event).map_err(|e| format!("{at}: event: {e}"))?;
-                let market = view_of(line, &ids, &at)?;
                 report.calls = report.calls.saturating_add(1);
                 let got = strategy.on_event(&event, &market.view());
-                compare(&at, intents_of(line, &at)?, &got, &mut ids, &mut report);
+                compare(&at, &intents_of(line, &symbol, &at)?, &got, &mut ids, &mut report);
                 check_headline(&strategy, line, &at, &mut report);
             }
             Some("stop") => {
-                let market = view_of(line, &ids, &at)?;
+                let (market, symbol) = view_of(line, &ids, &at)?;
                 report.calls = report.calls.saturating_add(1);
                 let got = strategy.stop(&market.view());
-                compare(&at, intents_of(line, &at)?, &got, &mut ids, &mut report);
+                compare(&at, &intents_of(line, &symbol, &at)?, &got, &mut ids, &mut report);
                 check_headline(&strategy, line, &at, &mut report);
             }
             other => return Err(format!("{at}: unknown kind {other:?}")),

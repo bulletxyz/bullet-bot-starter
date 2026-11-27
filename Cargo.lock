@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "bb-strategy-ladder"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bb-strategy-sdk",
  "rust_decimal",
@@ -93,7 +93,7 @@ dependencies = [
 
 [[package]]
 name = "bb-strategy-sdk"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "chrono",
  "erased-serde",

@@ -1,9 +1,15 @@
-use bb_strategy_sdk::testing::{Market, SimHost, book, d, fill_of, placed};
+use bb_strategy_sdk::testing::{Market, SimHost, book, d, fill_of, on_bullet, placed};
 use bb_strategy_sdk::{Order, Trade};
 
 use super::*;
 
 const NOON: u64 = 1_794_398_400_000;
+/// The one market `Market::new` puts on Bullet in these tests.
+const SYM: &str = "BTC-USD";
+
+fn book_event() -> Event {
+    on_bullet(SYM, MarketEvent::Book)
+}
 
 fn strategy() -> __TYPE__ {
     __TYPE__::from_settings(
@@ -18,7 +24,11 @@ fn sim() -> SimHost<__TYPE__> {
 
 /// The venue's update that `order` ended with `status`.
 fn ended(order: &NewOrder, status: OrderStatus) -> Event {
-    Event::Order(Order {
+    on_bullet(SYM, MarketEvent::Order(listed(order, status)))
+}
+
+fn listed(order: &NewOrder, status: OrderStatus) -> Order {
+    Order {
         id: "venue-1".into(),
         client_id: order.client_id.clone(),
         symbol: order.symbol.clone(),
@@ -28,11 +38,17 @@ fn ended(order: &NewOrder, status: OrderStatus) -> Event {
         quantity: order.quantity,
         filled_quantity: Decimal::ZERO,
         status,
-    })
+    }
 }
 
 fn cancels(intents: &[Intent]) -> Vec<&CancelOrder> {
-    intents.iter().filter_map(|i| if let Intent::Cancel(c) = i { Some(c) } else { None }).collect()
+    intents
+        .iter()
+        .filter_map(|i| match i {
+            Intent::On { intent: ExchangeIntent::Cancel(c), .. } => Some(c),
+            _ => None,
+        })
+        .collect()
 }
 
 #[test]
@@ -70,7 +86,7 @@ fn a_filled_side_is_placed_again_on_the_next_book() {
     let sent = sim.start().unwrap();
     let buy = placed(&sent)[0].clone();
     sim.send(&fill_of(&buy));
-    let again = sim.send(&Event::Book);
+    let again = sim.send(&book_event());
     assert_eq!(placed(&again).len(), 1);
     assert_eq!(placed(&again)[0].side, Side::Buy);
 }
@@ -80,14 +96,14 @@ fn a_partial_fill_keeps_the_side_until_the_rest_fills() {
     let mut sim = sim();
     let sent = sim.start().unwrap();
     let buy = placed(&sent)[0].clone();
-    let Event::Fill(full) = fill_of(&buy) else { unreachable!() };
+    let Event::Market { event: MarketEvent::Fill(full), .. } = fill_of(&buy) else { unreachable!() };
     let half = Trade { quantity: d("0.005"), ..full };
 
-    sim.send(&Event::Fill(half.clone()));
-    assert_eq!(placed(&sim.send(&Event::Book)), Vec::<&NewOrder>::new(), "the rest still rests");
+    sim.send(&on_bullet(SYM, MarketEvent::Fill(half.clone())));
+    assert_eq!(placed(&sim.send(&book_event())), Vec::<&NewOrder>::new(), "the rest still rests");
 
-    sim.send(&Event::Fill(half));
-    assert_eq!(placed(&sim.send(&Event::Book)).len(), 1, "filled in full: placed again");
+    sim.send(&on_bullet(SYM, MarketEvent::Fill(half)));
+    assert_eq!(placed(&sim.send(&book_event())).len(), 1, "filled in full: placed again");
 }
 
 #[test]
@@ -97,13 +113,13 @@ fn an_order_the_mid_left_behind_is_cancelled_by_client_id_then_placed_again() {
     let buy = placed(&sent)[0].clone();
 
     // The mid moves from 100 to 102, far more than a spacing.
-    sim.market.book = Some(book("101", "103", "10"));
-    let moved = sim.send(&Event::Book);
+    sim.market.set_book(Some(book("101", "103", "10")));
+    let moved = sim.send(&book_event());
     let asked = cancels(&moved);
     assert_eq!(asked.len(), 2);
     assert_eq!(asked[0].order_id, "", "by client id");
     assert_eq!(asked[0].client_id, buy.client_id);
-    assert_eq!(cancels(&sim.send(&Event::Book)), Vec::<&CancelOrder>::new(), "asked once");
+    assert_eq!(cancels(&sim.send(&book_event())), Vec::<&CancelOrder>::new(), "asked once");
 
     // The venue confirms the buy's cancel: a new buy at the new mid.
     let replaced = sim.send(&ended(&buy, OrderStatus::Cancelled));
@@ -115,7 +131,7 @@ fn an_order_the_mid_left_behind_is_cancelled_by_client_id_then_placed_again() {
 #[test]
 fn it_places_no_order_that_would_take_the_position_past_max_position() {
     let mut market = Market::new("BTC-USD", "99", "101", NOON);
-    market.position = d("0.02");
+    market.main_mut().unwrap().position = d("0.02");
     let mut sim = SimHost::new(strategy(), market);
     let sent = sim.start().unwrap();
     let orders = placed(&sent);
@@ -128,21 +144,19 @@ fn an_unknown_placement_holds_its_side_until_a_fresh_read_omits_it() {
     let mut sim = sim();
     let sent = sim.start().unwrap();
     let buy = placed(&sent)[0].clone();
-    sim.send(&Event::Unknown { intent: Intent::Place(buy.clone()), error: "timeout".into() });
-    assert_eq!(placed(&sim.send(&Event::Book)), Vec::<&NewOrder>::new(), "may rest: held");
+    let intent = Intent::on(BULLET, ExchangeIntent::Place(buy.clone()));
+    sim.send(&Event::Unknown { intent, error: "timeout".into() });
+    assert_eq!(placed(&sim.send(&book_event())), Vec::<&NewOrder>::new(), "may rest: held");
 
     // A read that began too soon after the place decides nothing.
     let sell = placed(&sent)[1].clone();
-    let listed = |o: &NewOrder| {
-        let Event::Order(order) = ended(o, OrderStatus::Open) else { unreachable!() };
-        order
-    };
-    sim.market.open_orders = Some(vec![listed(&sell)]);
-    sim.market.read_started_ms = Some(NOON + 1_000);
+    let bullet = sim.market.bullet_mut().unwrap();
+    bullet.open_orders = Some(vec![listed(&sell, OrderStatus::Open)]);
+    bullet.read_started_ms = Some(NOON + 1_000);
     assert_eq!(placed(&sim.send(&Event::Tick)), Vec::<&NewOrder>::new());
 
     // A later one omits the buy (it never landed) and lists the sell: only the buy is placed.
-    sim.market.read_started_ms = Some(NOON + LIST_LAG_MS);
+    sim.market.bullet_mut().unwrap().read_started_ms = Some(NOON + LIST_LAG_MS);
     let again = sim.send(&Event::Tick);
     assert_eq!(placed(&again).len(), 1);
     assert_eq!(placed(&again)[0].side, Side::Buy);
@@ -151,10 +165,10 @@ fn an_unknown_placement_holds_its_side_until_a_fresh_read_omits_it() {
 #[test]
 fn it_waits_while_orders_are_stopped_and_cancels_all_at_stop() {
     let mut market = Market::new("BTC-USD", "99", "101", NOON);
-    market.path_stop = Some("daily loss stop".into());
+    market.bullet_mut().unwrap().path_stop = Some("daily loss stop".into());
     let mut sim = SimHost::new(strategy(), market);
     assert_eq!(sim.start().unwrap(), Vec::new());
-    assert_eq!(sim.stop(), vec![Intent::CancelAll]);
+    assert_eq!(sim.stop(), vec![Intent::on(BULLET, ExchangeIntent::CancelAll(Some(SYM.into())))]);
 }
 
 #[test]

@@ -9,9 +9,9 @@
 use std::collections::VecDeque;
 
 use bb_strategy_sdk::{
-    CandleInterval, Decimal, Describe, Descriptor, Event, FromSettings, HistoryNeed, Intent,
-    MAX_FIELD_TEXT, OrderBook, Range, ReportField, SettingKind, SettingSpec, StrategyAdapter,
-    StrategyError, StrategyReport, View, Warmup,
+    BULLET, CandleInterval, Decimal, Describe, Descriptor, Event, ExchangeNeed, FromSettings,
+    HistoryNeed, Intent, MAX_FIELD_TEXT, MarketView, OrderBook, Range, ReportField, SettingKind,
+    SettingSpec, StrategyAdapter, StrategyError, StrategyReport, View, Warmup,
 };
 use serde::Deserialize;
 
@@ -97,9 +97,10 @@ impl Sma {
         }
     }
 
-    /// The live bar moves to the view's mid; the one before closes once the clock leaves it.
+    /// The live bar moves to the mid of its market (Bullet's one); the one before closes once the
+    /// clock leaves it.
     fn see(&mut self, view: &View<'_>) {
-        let Some(mid) = mid(view.book) else { return };
+        let Some(mid) = mid(view.sole_market(BULLET).and_then(MarketView::book)) else { return };
         let open = self.interval.open_of(view.now_ms);
         match self.live {
             Some((at, close)) if open > at => self.close_bar(close),
@@ -150,7 +151,7 @@ impl Describe for Sma {
                 interval,
             ],
             settings_schema: schemars::schema_for!(SmaSettings),
-            legs: Vec::new(),
+            exchanges: vec![ExchangeNeed::new(BULLET)],
         }
     }
 }

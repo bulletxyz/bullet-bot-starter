@@ -5,7 +5,8 @@
 
 use bb_strategy_funding_arb::{FundingArb, decide};
 use bb_strategy_sdk::targets::{Direction, Leg, MarketView, Params, SymbolView};
-use bb_strategy_sdk::{Event, Intent, MarketFacts, StrategyAdapter, View};
+use bb_strategy_sdk::testing::{Market, on_bullet};
+use bb_strategy_sdk::{Event, Intent, MarketEvent, StrategyAdapter};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 
@@ -38,25 +39,9 @@ fn market() -> MarketView {
     }
 }
 
-fn view() -> View<'static> {
-    View {
-        now_ms: 0,
-        symbol: "BTC-USD",
-        book: None,
-        position: Decimal::ZERO,
-        avg_entry: None,
-        realized_pnl: Decimal::ZERO,
-        open_orders: None,
-        positions: None,
-        reconnected: false,
-        venue_halt: None,
-        path_stop: None,
-        read_started_ms: None,
-        limits: None,
-        stop: None,
-        market: MarketFacts::default(),
-        legs: &[],
-    }
+/// No exchange shown: funding-arb reads only the market view its event carries.
+fn shown() -> Market {
+    Market::of(0, Vec::new())
 }
 
 #[test]
@@ -66,7 +51,7 @@ fn a_market_view_is_answered_with_the_targets_decide_computes() {
     assert_eq!(want[0].direction, Direction::ShortBullet);
     assert!(want[0].notional_usd > Decimal::ZERO, "the scenario must enter");
     let mut s = FundingArb;
-    let out = s.on_event(&Event::MarketView(m), &view());
+    let out = s.on_event(&Event::MarketView(m), &shown().view());
     assert_eq!(out.len(), 1);
     let Intent::Targets(got) = &out[0] else { panic!("expected Targets, got {:?}", out[0]) };
     assert_eq!(got, &want);
@@ -74,9 +59,10 @@ fn a_market_view_is_answered_with_the_targets_decide_computes() {
 
 #[test]
 fn nothing_else_makes_it_act() {
+    let m = shown();
     let mut s = FundingArb;
-    assert!(s.start(&view()).unwrap().is_empty());
-    assert!(s.on_event(&Event::Tick, &view()).is_empty());
-    assert!(s.on_event(&Event::Book, &view()).is_empty());
-    assert!(s.stop(&view()).is_empty());
+    assert!(s.start(&m.view()).unwrap().is_empty());
+    assert!(s.on_event(&Event::Tick, &m.view()).is_empty());
+    assert!(s.on_event(&on_bullet("BTC-USD", MarketEvent::Book), &m.view()).is_empty());
+    assert!(s.stop(&m.view()).is_empty());
 }

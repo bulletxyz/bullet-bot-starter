@@ -4,7 +4,9 @@
 
 #![expect(clippy::arithmetic_side_effects, reason = "Decimal sizes far below 7.9e28")]
 
-use bb_strategy_sdk::{CloseReport, ControlCmd, ControlReply, Intent, SettingChanges, View};
+use bb_strategy_sdk::{
+    BULLET, CloseReport, ControlCmd, ControlReply, Intent, SettingChanges, View,
+};
 use bb_strategy_support::floor_to_step;
 use rust_decimal::Decimal;
 
@@ -44,7 +46,8 @@ impl MarketMaker {
             ControlCmd::Resume => {
                 self.paused = false;
                 self.forced = true;
-                match view.path_stop.or(view.venue_halt) {
+                let bullet = Self::bullet(view);
+                match bullet.and_then(|e| e.path_stop.as_deref().or(e.venue_halt.as_deref())) {
                     Some(why) => {
                         ControlReply::Ok(format!("Resumed, but new orders still stop: {why}."))
                     }
@@ -62,7 +65,8 @@ impl MarketMaker {
                     // No quote from now on; the host's close cancels what rests first.
                     self.closing = Some(id);
                     self.paused = true;
-                    return vec![Intent::ClosePosition { id }];
+                    let (exchange, symbol) = (BULLET.to_string(), self.symbol().to_string());
+                    return vec![Intent::ClosePosition { id, exchange, symbol }];
                 }
             }
             ControlCmd::KillSwitch { .. } => ControlReply::Refused(

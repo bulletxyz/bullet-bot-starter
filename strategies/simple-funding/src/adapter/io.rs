@@ -44,7 +44,7 @@ pub(crate) struct Calls {
     /// Acked writes handed over, likewise.
     persisted: HashMap<u64, Option<Result<(), String>>>,
     pub(crate) now_ms: u64,
-    pub(crate) leg: String,
+    pub(crate) exchange: String,
     pub(crate) symbols: Vec<String>,
     pub(crate) market: BTreeMap<String, MarketFacts>,
     /// The strategy asked to stop the bot.
@@ -134,8 +134,8 @@ impl Shared {
                 (None, Some(call)) => {
                     calls.next_id = calls.next_id.wrapping_add(1);
                     let id = calls.next_id;
-                    let leg = calls.leg.clone();
-                    calls.out.push_back(Intent::Request { id, leg, call });
+                    let exchange = calls.exchange.clone();
+                    calls.out.push_back(Intent::Request { id, exchange, call });
                     calls.answers.insert(id, None);
                     asked = Some(id);
                     id
