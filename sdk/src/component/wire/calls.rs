@@ -1,16 +1,15 @@
-//! Legs, venue calls and their answers, to and from the world's generated types.
+//! Exchanges, venue calls and their answers, to and from the world's generated types.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::{
     Uncarried, amend, amend_to_wire, book, cancel, cancel_to_wire, market, new_order,
-    new_order_to_wire, order, result, side, trade, uncarried, undec, undec_opt, w,
+    new_order_to_wire, order, result, side, trade, undec, undec_opt, w,
 };
 use crate::decimal::BadDecimal;
 use crate::host::calls::{Answer, CallError, ReadQuery, VenueCall};
-use crate::host::legs::LegView;
-use crate::strategy::adapter::{Event, Intent};
+use crate::host::exchanges::{ExchangeView, MarketView};
+use crate::strategy::adapter::{Event, ExchangeIntent, MarketEvent};
 use crate::types::{AccountEquity, CancelResult, FundingSample, Position};
 
 pub(crate) fn position(p: &w::Position) -> Result<Position, BadDecimal> {
@@ -27,54 +26,57 @@ pub(crate) fn positions(list: &[w::Position]) -> Result<Vec<Position>, BadDecima
     list.iter().map(position).collect()
 }
 
-fn by_symbol<W, T>(
-    list: &[(String, W)],
-    f: impl Fn(&W) -> Result<T, BadDecimal>,
-) -> Result<BTreeMap<String, T>, BadDecimal> {
-    list.iter().map(|(s, v)| Ok((s.clone(), f(v)?))).collect()
-}
-
-pub(crate) fn leg_view(l: &w::LegView) -> Result<LegView, BadDecimal> {
-    Ok(LegView {
-        id: l.id.clone(),
-        venue: l.venue.clone(),
-        symbols: l.symbols.clone(),
-        books: by_symbol(&l.books, |b| book(b).map(Arc::new))?,
-        book_at_ms: l.book_at_ms.iter().cloned().collect(),
-        marks: by_symbol(&l.marks, |m| undec(*m))?,
-        funding_rates: by_symbol(&l.funding_rates, |r| undec(*r))?,
-        positions: l.positions.as_deref().map(positions).transpose()?,
-        market: by_symbol(&l.market, market)?,
-        reconnected: l.reconnected,
+fn market_view(m: &w::MarketView) -> Result<MarketView, BadDecimal> {
+    Ok(MarketView {
+        symbol: m.symbol.clone(),
+        book: m.book.as_ref().map(|b| book(b).map(Arc::new)).transpose()?,
+        book_at_ms: m.book_at_ms,
+        mark: undec_opt(m.mark)?,
+        funding_rate: undec_opt(m.funding_rate)?,
+        facts: market(&m.facts)?,
+        position: undec(m.position)?,
+        avg_entry: undec_opt(m.avg_entry)?,
+        realized_pnl: undec(m.realized_pnl)?,
     })
 }
 
-/// A shutdown on a leg crosses as a plain shutdown, as the native host lifts it; `Ok(None)` for a nested leg or
-/// a request, which the native host refuses with an outcome.
-pub(crate) fn leg_intent_to_wire(
-    leg: String,
-    intent: Intent,
-) -> Result<Option<w::Intent>, Uncarried> {
-    let intent = match intent {
-        Intent::Shutdown(why) => return Ok(Some(w::Intent::Shutdown(why))),
-        Intent::Place(o) => w::LegIntent::Place(new_order_to_wire(o)),
-        Intent::Cancel(c) => w::LegIntent::Cancel(cancel_to_wire(c)),
-        Intent::CancelAll => w::LegIntent::CancelAll,
-        Intent::Amend(a) => w::LegIntent::Amend(amend_to_wire(a)),
-        Intent::Flatten { symbols } => w::LegIntent::Flatten(symbols),
-        Intent::Leg { .. } | Intent::Request { .. } => return Ok(None),
-        other => return Err(uncarried(&other)),
-    };
-    Ok(Some(w::Intent::Leg(w::OnLeg { leg, intent })))
+pub(crate) fn exchange_view(e: &w::ExchangeView) -> Result<ExchangeView, BadDecimal> {
+    Ok(ExchangeView {
+        venue: e.venue.clone(),
+        markets: e.markets.iter().map(market_view).collect::<Result<_, _>>()?,
+        open_orders: e
+            .open_orders
+            .as_ref()
+            .map(|orders| orders.iter().map(order).collect::<Result<Vec<_>, _>>())
+            .transpose()?,
+        positions: e.positions.as_deref().map(positions).transpose()?,
+        reconnected: e.reconnected,
+        venue_halt: e.venue_halt.clone(),
+        path_stop: e.path_stop.clone(),
+        read_started_ms: e.read_started_ms,
+    })
 }
 
-pub(crate) fn leg_intent(intent: w::LegIntent) -> Result<Intent, BadDecimal> {
+pub(crate) fn exchange_intent_to_wire(
+    intent: ExchangeIntent,
+) -> Result<w::ExchangeIntent, Uncarried> {
     Ok(match intent {
-        w::LegIntent::Place(o) => Intent::Place(new_order(o)?),
-        w::LegIntent::Cancel(c) => Intent::Cancel(cancel(c)),
-        w::LegIntent::CancelAll => Intent::CancelAll,
-        w::LegIntent::Amend(a) => Intent::Amend(amend(a)?),
-        w::LegIntent::Flatten(symbols) => Intent::Flatten { symbols },
+        ExchangeIntent::Place(o) => w::ExchangeIntent::Place(new_order_to_wire(o)),
+        ExchangeIntent::Cancel(c) => w::ExchangeIntent::Cancel(cancel_to_wire(c)),
+        ExchangeIntent::CancelAll(symbol) => w::ExchangeIntent::CancelAll(symbol),
+        ExchangeIntent::Amend(a) => w::ExchangeIntent::Amend(amend_to_wire(a)),
+        ExchangeIntent::Flatten(symbols) => w::ExchangeIntent::Flatten(symbols),
+        ExchangeIntent::CancelOwn(_) => return Err(Uncarried("CancelOwn")),
+    })
+}
+
+pub(crate) fn exchange_intent(intent: w::ExchangeIntent) -> Result<ExchangeIntent, BadDecimal> {
+    Ok(match intent {
+        w::ExchangeIntent::Place(o) => ExchangeIntent::Place(new_order(o)?),
+        w::ExchangeIntent::Cancel(c) => ExchangeIntent::Cancel(cancel(c)),
+        w::ExchangeIntent::CancelAll(symbol) => ExchangeIntent::CancelAll(symbol),
+        w::ExchangeIntent::Amend(a) => ExchangeIntent::Amend(amend(a)?),
+        w::ExchangeIntent::Flatten(symbols) => ExchangeIntent::Flatten(symbols),
     })
 }
 
@@ -192,12 +194,12 @@ pub(crate) fn reply(
     })
 }
 
-pub(crate) fn leg_event(e: w::LegEvent) -> Result<Event, BadDecimal> {
+pub(crate) fn market_event(e: w::MarketEvent) -> Result<Event, BadDecimal> {
     let event = match e.event {
-        w::LegEventKind::Book => Event::Book,
-        w::LegEventKind::Mark(m) => Event::Mark(undec(m)?),
-        w::LegEventKind::Fill(t) => Event::Fill(trade(t)?),
-        w::LegEventKind::Order(o) => Event::Order(order(&o)?),
+        w::MarketEventKind::Book => MarketEvent::Book,
+        w::MarketEventKind::Mark(m) => MarketEvent::Mark(undec(m)?),
+        w::MarketEventKind::Fill(t) => MarketEvent::Fill(trade(t)?),
+        w::MarketEventKind::Order(o) => MarketEvent::Order(order(&o)?),
     };
-    Ok(Event::Leg { leg: e.leg, symbol: e.symbol, event: Box::new(event) })
+    Ok(Event::Market { exchange: e.exchange, symbol: e.symbol, event })
 }

@@ -1,7 +1,7 @@
 # SDK cheat sheet
 
 Everything a strategy touches, on one page. The source is `sdk/src/` (`strategy/adapter.rs`, `types.rs`,
-`host/calls.rs`, `host/legs.rs`, `history/`, `strategy/describe.rs`, `testing.rs`); the template
+`host/calls.rs`, `host/exchanges.rs`, `history/`, `strategy/describe.rs`, `testing.rs`); the template
 (`templates/strategy/`) uses most of it.
 
 Agents: clone the repo first (`git clone https://github.com/<owner>/bullet-bot-starter`, the
@@ -26,50 +26,64 @@ the checkout, not file by file over the web.
 | Field | What |
 |---|---|
 | `now_ms` | The bot's clock (Unix ms). The only clock a strategy has. |
-| `symbol` | The market it trades. |
-| `book` | `Option<&OrderBook>`: `bids` and `asks` (price to size), `best_bid()`, `best_ask()`, `midpoint()`. |
-| `position`, `avg_entry`, `realized_pnl` | The bot's inventory from fills, seeded from the venue's position at start. Signed: short is negative. |
+| `exchanges` | One `ExchangeView` per venue the strategy declared, Bullet always among them. `view.exchange(venue)`, `view.market(venue, symbol)`. |
+| `limits`, `stop` | The bot's built-ins only (`None` for a plugin): the hard limits the bot holds the orders to (live), and its own stop, typed (what `path_stop` says in words). |
+
+An `ExchangeView` (`BULLET` is `"bullet"`):
+
+| Field | What |
+|---|---|
+| `venue` | What its intents and events carry. |
+| `markets` | One `MarketView` per market declared on it; `market(symbol)` finds one. |
 | `open_orders` | `Some` only on the view `start` gets and on a tick's first round when the venue read worked; `None` means unknown, never "no orders". |
-| `positions` | The venue's positions from that same read, same freshness. `signed_position(positions, symbol)` gives one signed size. |
+| `positions` | The venue's positions from that same read, same freshness. `venue_position(symbol)` gives one signed size. |
 | `read_started_ms` | When that read began; `None` without a fresh read. |
 | `reconnected` | The venue stream reconnected since the last tick: events may be missing, so reconcile. True on one tick. |
 | `venue_halt`, `path_stop` | Why the venue, or the bot's own order path (its stop), refuses new orders now. While either is `Some`, don't quote. |
-| `market` | `tick_size`, `step_size`, `maker_fee_bps`, `taker_fee_bps`, `fee_tier`, `venue_name` (each optional). |
-| `legs` | Other venue accounts the strategy declared (`Descriptor::legs`); empty for one market. |
-| `limits`, `stop` | The bot's built-ins only (`None` for a plugin): the hard limits the bot holds the orders to (live), and its own stop, typed (what `path_stop` says in words). |
+
+A `MarketView`:
+
+| Field | What |
+|---|---|
+| `symbol` | The market. |
+| `book()`, `book_at_ms` | `Option<&OrderBook>`: `bids` and `asks` (price to size), `best_bid()`, `best_ask()`, `midpoint()`; when it came. |
+| `mark`, `funding_rate` | The last mark price and funding rate (per 8h), when the venue sent them. |
+| `position`, `avg_entry`, `realized_pnl` | The bot's inventory from fills, seeded from the venue's position at start. Signed: short is negative. |
+| `facts` | `tick_size`, `step_size`, `maker_fee_bps`, `taker_fee_bps`, `fee_tier`, `venue_name` (each optional). |
 
 ## `Event`: what happens
 
 | Event | Carries |
 |---|---|
-| `Book` | Nothing: the new book is in `view.book`. |
+| `Market { exchange, symbol, event }` | Something in one market; `event` is one of the four below. |
+| `Book` | Nothing: the new book is in `view.market(exchange, symbol)`. |
 | `Mark(price)` | The venue's mark price for the symbol. |
-| `Tick` | Nothing. A tick's first round may carry a fresh `open_orders` / `positions` read. |
 | `Fill(Trade)` | One fill: `client_id`, `order_id`, `side`, `price`, `quantity` (this fill only, so it may be part of the order), `timestamp`. |
 | `Order(Order)` | An order update: `client_id`, `status` (`Open`, `PartiallyFilled`, `Filled`, `Cancelled`, `Rejected`), `quantity`, `filled_quantity`. |
+| `Tick` | Nothing. A tick's first round may carry a fresh `open_orders` / `positions` read. |
 | `Outcome { intent, result }` | The answer to one of your intents: `result.success`, `result.error`, `result.order_id` (`None`: not known yet). |
 | `Unknown { intent, error }` | The call for a place or amend failed after it may have reached the venue: the order may rest or have filled. |
 | `Answer { id, reply }` | The one answer to your `Request` with that `id`. |
-| `Leg { leg, symbol, event }` | A book, mark, fill or order update on another leg. |
 
 The bot's built-in strategies run on the same trait and also get `Reference`, `Control`, `Persisted`,
 `Closed` and `Failed`; a plugin is never sent them (match them with `_ => Vec::new()`).
 
 ## `Intent`: what you ask for
 
+- `On { exchange, intent }` (`Intent::on(BULLET, ..)`): an order intent on one exchange you declared, for one of
+  its markets. `intent` is one of the six below.
 - `Place(NewOrder)`: `symbol`, `side`, `order_type` (`Limit`, `PostOnly`, `Market`), `price`,
   `quantity`, `client_id`, `reduce_only`, `protect` (a stop and take-profit the venue holds for the
   position once it fills; paper sends none).
 - `Cancel(CancelOrder)`: by venue `order_id`, or **by client id with `order_id` empty**
   (`order_id: String::new(), client_id: Some(id)`).
 - `Amend(AmendOrder)`: a cancel and a new order in one.
-- `CancelAll`: your own orders only, never the owner's.
-- `Flatten { symbols }`: close the venue's position in each (reduce-only IOCs); refused on the
-  owner's main account for the symbol it trades.
-- `Request { id, leg, call }`: a venue read (`Positions`, `OpenOrders`, `Book`, `AccountEquity`,
+- `CancelAll(symbol)`: your own orders only, never the owner's; every market of the exchange with `None`.
+- `Flatten(symbols)`: close the venue's position in each (reduce-only IOCs); refused on the
+  owner's main account.
+- `Request { id, exchange, call }`: a venue read (`Positions`, `OpenOrders`, `Book`, `AccountEquity`,
   `MarginRatio`, `FundingHistory`, `OpenInterest`, `RefreshMetadata`), a batch write, or `Wait {
   until_ms }`. Answered once by `Event::Answer` with the same `id`; don't reuse an id in flight.
-- `Leg { leg, intent }`: an intent on a declared leg (`TRADE_LEG`, `"trade"`, is the main one).
 - `Shutdown`: never; the bot faults a plugin that sends it. To stop, cancel and send nothing more.
 - `Reply`, `Persist`, `ClosePosition`, `SetLimits`, `StandDown`, `Targets`: for the bot's built-in strategies only.
   A plugin that returns one faults (the component traps): never return them. A plugin's `CancelOwn` crosses as
@@ -92,8 +106,8 @@ At most 64 intents a call.
   The template waits 30 s (`LIST_LAG_MS`); see `strategies/ladder/src/retry.rs` for more.
 - **Freshness.** Act on `open_orders` / `positions` only when they are `Some`, and decide that an
   order is gone only from a read whose `read_started_ms` is after you sent it (plus a lag).
-- **Position.** `view.position` is the bot's from fills; size closes on the venue's
-  (`signed_position(view.positions?, view.symbol)`) when you have a fresh read.
+- **Position.** `market.position` is the bot's from fills; size closes on the venue's
+  (`exchange.venue_position(symbol)?`) when you have a fresh read.
 - **Numbers.** `Decimal` and `RoundingStrategy` are both exported by the SDK: round a size down with
   `size.round_dp_with_strategy(8, RoundingStrategy::ToZero)`, no `rust_decimal` dependency needed.
 
@@ -104,7 +118,8 @@ At most 64 intents a call.
 `SettingSpec::decimal(path, default, range, help)`, `::int(...)`, `::flag(path, default, help)` or
 `::choice(path, choices, default_index, help)`, then `.tier(Tier::Limit)`,
 `.loosening(Loosening::Up)`, `.required()`), `settings_schema: schemars::schema_for!(Settings)`, and
-`legs` (`LegNeed::new(id, venue)` per extra venue account). `Tier::Limit` with `Loosening::Up` means
+`exchanges` (`ExchangeNeed::new(venue)` per venue, `ExchangeNeed::new(BULLET)` always; the bot refuses a
+descriptor without it). `Tier::Limit` with `Loosening::Up` means
 raising it needs the owner's signature. Name settings as you like: the bot never reads one as its
 own limit (only a built-in names the bot limit a setting sets, with `Setting::caps`).
 

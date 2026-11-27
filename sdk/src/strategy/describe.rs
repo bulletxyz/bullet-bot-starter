@@ -3,6 +3,7 @@
 
 use rust_decimal::Decimal;
 
+use crate::host::exchanges::BULLET;
 pub use crate::param_spec::{Loosening, Range, Tier};
 
 /// How a strategy describes itself; `describe` must not depend on settings (it runs before
@@ -72,23 +73,41 @@ pub struct Descriptor {
     pub settings: Vec<SettingSpec>,
     /// The JSON schema of the settings `init` takes (`schemars::schema_for!(TheSettings)`).
     pub settings_schema: schemars::Schema,
-    /// The legs it needs besides the one it trades (another venue account, e.g. a hedge): the
-    /// host refuses to start it unless each is configured. Empty for a strategy on one symbol.
-    pub legs: Vec<LegNeed>,
+    /// The exchanges it trades, one per venue, [`BULLET`] among them: the host refuses to start it
+    /// unless each is set up, and refuses a descriptor without Bullet ([`Self::check`]).
+    pub exchanges: Vec<ExchangeNeed>,
 }
 
-/// A leg a strategy needs: its name for it (what [`Intent::Leg`](crate::Intent) carries) and the
-/// venue it must be on.
+impl Descriptor {
+    /// Whether the host may run it: it trades Bullet and names each venue once.
+    ///
+    /// # Errors
+    /// What is wrong, in words.
+    pub fn check(&self) -> Result<(), String> {
+        let venues = || self.exchanges.iter().map(|e| e.venue.as_str());
+        if !venues().any(|v| v == BULLET) {
+            return Err(format!("a strategy trades {BULLET}: its descriptor must list it"));
+        }
+        for (i, venue) in venues().enumerate() {
+            if venues().take(i).any(|v| v == venue) {
+                return Err(format!("the exchange {venue} is listed twice"));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// An exchange a strategy trades: the venue (what [`Intent::On`](crate::Intent) carries). The bot's
+/// setting `exchanges.<venue>.markets` names its markets.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LegNeed {
-    pub id: String,
+pub struct ExchangeNeed {
     pub venue: String,
 }
 
-impl LegNeed {
+impl ExchangeNeed {
     #[must_use]
-    pub fn new(id: &str, venue: &str) -> Self {
-        Self { id: id.into(), venue: venue.into() }
+    pub fn new(venue: &str) -> Self {
+        Self { venue: venue.into() }
     }
 }
 

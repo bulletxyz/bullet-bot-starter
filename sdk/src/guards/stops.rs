@@ -1,6 +1,7 @@
 //! The daily loss stop's state: what survives a restart ([`PersistedStops`]), the day's P&L
-//! ([`DayPnl`]), the account's value at the day's start ([`DayOpen`]) and why quoting or ordering stopped ([`StopReason`]). Shared by the market maker's
-//! guards and the self-trading strategies' loss stop; where the stops are kept is the host's.
+//! ([`DayPnl`]), the account's value at the day's start ([`DayOpen`]) and why quoting or ordering
+//! stopped ([`StopReason`]). Shared by the market maker's guards and the self-trading strategies'
+//! loss stop; where the stops are kept is the host's.
 
 use chrono::{DateTime, NaiveDate};
 use rust_decimal::Decimal;
@@ -13,7 +14,7 @@ pub enum StopReason {
     /// Day P&L (net of fees) hit the daily loss limit. Clears at 00:00 UTC.
     DailyLoss { day: NaiveDate },
     /// No book update for `stale_secs`. Clears on the next book update. `market`: the one with no
-    /// fresh book, when a leg's stop names it (left out otherwise, as before).
+    /// fresh book, when an exchange's stop names it (left out otherwise, as before).
     StalePrice {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         market: Option<String>,
@@ -55,7 +56,7 @@ pub fn utc_day(now_ms: u64) -> NaiveDate {
         .map_or(NaiveDate::MIN, |dt| dt.date_naive())
 }
 
-/// A market a safety hold kept, with the venue its leg is on. An entry saved before the venue was
+/// A market a safety hold kept, with the exchange it is on. An entry saved before the venue was
 /// recorded is a bare symbol: it stands for every venue the instance declares, is released only
 /// when all of them read flat, and is saved back bare.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -80,7 +81,7 @@ impl HeldMarket {
         }
     }
 
-    /// The venue its leg is on (`None`: every venue the instance declares).
+    /// The exchange the market is on (`None`: every venue the instance declares).
     #[must_use]
     pub fn venue(&self) -> Option<&str> {
         match self {
@@ -107,18 +108,18 @@ pub struct PersistedStops {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub paused_for_safety: bool,
     /// The markets a universe strategy declared when its safety hold was saved, each with the
-    /// venue its leg is on: a held start closes these as well as the ones it finds then, so a
+    /// exchange it is on: a held start closes these as well as the ones it finds then, so a
     /// market that has since left its universe is never read as flat. Written only when set (the
     /// file's format is unchanged).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub held_markets: Vec<HeldMarket>,
     /// The instance's last run that traded was paper (its own mode, or held there): its next live
-    /// start first reads its markets for the real legs a live run left there. Written only when
+    /// start first reads its markets for the real positions a live run left there. Written only when
     /// set (the file's format is unchanged).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ran_paper: bool,
     /// The markets every paper run declared since the last live start, each on its venue: that
-    /// live start reads them all for the real legs a live run left there (a refused or failed
+    /// live start reads them all for the real positions a live run left there (a refused or failed
     /// build, a run between and a restart all keep them). Written only when set (the file's format
     /// is unchanged).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -141,7 +142,7 @@ pub struct PersistedStops {
     /// is unchanged).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub day_equity: Option<Decimal>,
-    /// The accounts `day_equity` is the value of together (each leg's venue): a start over other
+    /// The accounts `day_equity` is the value of together (each exchange's): a start over other
     /// accounts (a strategy switched the same day) reads another sum, so it counts no gap.
     /// Written only when set (the file's format is unchanged).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

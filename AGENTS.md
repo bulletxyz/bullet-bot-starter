@@ -47,7 +47,7 @@ just ci              # fmt, clippy -D warnings, tests, build
 - At most 64 intents a call; cancel only its own orders; never `Shutdown` (the bot faults it).
 - A strategy only names its settings; the bot decides where they live: `[instances.<id>.plugins.<name>]` on the bot,
   changed live at `plugins.<name>.<setting>` on an instance. Any name is fine (`max_position` too): the bot never
-  reads one as its own limit. Only `legs.<leg>.symbols` for a leg it declares is the bot's.
+  reads one as its own limit. Only `exchanges.<venue>.markets` for an exchange it declares is the bot's.
 
 ## Money safety
 

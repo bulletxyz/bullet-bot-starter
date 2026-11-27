@@ -9,7 +9,7 @@ use crate::component::wire;
 /// The world's generated types, for the macro.
 pub use crate::component::wire::w;
 use crate::strategy::adapter::{
-    FromSettings, Intent, StrategyAdapter, StrategyError, StrategyReport,
+    ExchangeIntent, FromSettings, Intent, StrategyAdapter, StrategyError, StrategyReport,
 };
 use crate::strategy::describe::Describe;
 use crate::strategy::erased::ErasedAdapter;
@@ -70,8 +70,10 @@ pub fn describe<S: Describe>() -> w::Descriptor {
 /// `init`: build `S` from its settings; a second `init` replaces the first.
 ///
 /// # Errors
-/// What `S::from_settings` refused.
-pub fn init<S: StrategyAdapter + FromSettings>(settings: &str) -> Result<(), String> {
+/// A descriptor the host would refuse ([`Descriptor::check`](crate::Descriptor::check)), or what
+/// `S::from_settings` refused.
+pub fn init<S: StrategyAdapter + FromSettings + Describe>(settings: &str) -> Result<(), String> {
+    S::describe().check()?;
     let strategy = S::from_settings(settings).map_err(|StrategyError(e)| e)?;
     STRATEGY.with(|s| *s.borrow_mut() = Some(Box::new(strategy)));
     Ok(())
@@ -149,19 +151,16 @@ mod tests;
 /// `CancelOwn` becomes the plugin's `CancelAll` (its own orders only) and `Notify` is dropped, so a round copied
 /// from a built-in keeps its close.
 fn carry(intents: Vec<Intent>) -> Result<Vec<w::Intent>, wire::Uncarried> {
-    let own = |intent: Box<Intent>| match *intent {
-        Intent::CancelOwn => Box::new(Intent::CancelAll),
-        _ => intent,
-    };
     let mut out = Vec::with_capacity(intents.len());
     for intent in intents {
         let intent = match intent {
-            Intent::CancelOwn => Intent::CancelAll,
-            Intent::Leg { leg, intent } => Intent::Leg { leg, intent: own(intent) },
+            Intent::On { exchange, intent: ExchangeIntent::CancelOwn(symbol) } => {
+                Intent::On { exchange, intent: ExchangeIntent::CancelAll(symbol) }
+            }
             Intent::Notify(_) => continue,
             other => other,
         };
-        out.extend(wire::intent_to_wire(intent)?);
+        out.push(wire::intent_to_wire(intent)?);
     }
     Ok(out)
 }

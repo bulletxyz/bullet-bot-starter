@@ -36,7 +36,7 @@ Edit `strategies/my-strategy/src/lib.rs`:
 - `Settings` and `describe()` are the settings the owner can change, with ranges.
   Name them as you like: on the bot each instance keeps its own table of them, `[instances.<id>.plugins.<name>]`,
   changed live at `plugins.<name>.<setting>`, and the bot never takes one for its own limits. Only
-  `legs.<leg>.symbols` for a leg you declare is the bot's.
+  `exchanges.<venue>.markets` for an exchange you declare is the bot's.
 
 More to copy from: [ladder](../strategies/ladder/) (retries, unknown outcomes, venue reads).
 [sma](../strategies/sma/) warms up on past candles: the bot gives a plugin up to 999 bars at start.

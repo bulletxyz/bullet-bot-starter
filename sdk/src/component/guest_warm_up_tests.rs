@@ -14,6 +14,15 @@ impl FromSettings for Warmer {
     }
 }
 
+impl Describe for Warmer {
+    const NAME: &'static str = "warmer";
+    const VERSION: &'static str = "0.1.0";
+
+    fn describe() -> crate::strategy::describe::Descriptor {
+        Echo::describe()
+    }
+}
+
 impl StrategyAdapter for Warmer {
     type Report = EchoReport;
 

@@ -13,8 +13,12 @@
 /// report's JSON and its `schema` with typed fields (`report-field`), which the host shows. 0.4.0 added an
 /// order's `protect`: the stop (and take-profit) the venue holds for the position once it fills. 0.5.0
 /// added past candles at start: `history` (what the strategy warms up on) and `warm-up` (what the host
-/// loaded), so an indicator has its history from its first event, after every restart too.
-package bb:strategy@0.5.0;
+/// loaded), so an indicator has its history from its first event, after every restart too. 0.6.0
+/// replaced the one main market and its legs with exchanges: the view holds every exchange the strategy
+/// trades (`exchange-view`, Bullet always one of them), each with its markets (`market-view`); an order
+/// intent names its exchange (`intent::on`), a market event its exchange and symbol (`event::market`),
+/// a request its exchange, and `descriptor.exchanges` replaced `descriptor.legs`.
+package bb:strategy@0.6.0;
 
 /// The strategy: StrategyAdapter's calls, plus `init` (build it from its settings), with the data the
 /// host and the strategy exchange.
@@ -169,46 +173,35 @@ interface adapter {
         rate-8h: decimal,
     }
 
-    /// One of the strategy's other legs (another venue account, or more symbols) as the host
-    /// knows it now. Per symbol lists hold one entry per symbol that has one.
-    record leg-view {
-        /// The strategy's name for it (`descriptor.legs`): what its intents and events carry.
-        id: string,
-        /// The venue it trades.
-        venue: string,
-        /// The symbols declared on it; an intent for another one is refused.
-        symbols: list<string>,
-        /// The last book of each symbol, and when it came (the bot's clock, ms).
-        books: list<tuple<string, order-book>>,
-        book-at-ms: list<tuple<string, u64>>,
-        /// The last positive mark price of each symbol.
-        marks: list<tuple<string, decimal>>,
-        /// The last live funding rate (per 8h) the venue's marks carried for each symbol.
-        funding-rates: list<tuple<string, decimal>>,
-        /// The venue's positions as the last read of this leg found them; none when that read
-        /// failed, and from a fill on the leg until the next read. Unknown is never flat.
-        positions: option<list<position>>,
-        market: list<tuple<string, market-facts>>,
-        /// The leg's connection reconnected since the tick before: what came meanwhile may have
-        /// been missed. True for the tick that read it only.
-        reconnected: bool,
-    }
-
-    /// What the host shows the strategy on every call.
-    record view {
-        /// The bot's clock, Unix milliseconds.
-        now-ms: u64,
+    /// One market the strategy declared on an exchange, as the host knows it now.
+    record market-view {
         symbol: string,
+        /// The last book, and when it came (the bot's clock, ms).
         book: option<order-book>,
-        /// The host's inventory from fills, seeded from the venue position at start.
+        book-at-ms: option<u64>,
+        /// The last positive mark price.
+        mark: option<decimal>,
+        /// The last live funding rate (per 8h) the venue's marks carried.
+        funding-rate: option<decimal>,
+        facts: market-facts,
+        /// The host's inventory from fills in this market, seeded from the venue position at start.
         position: decimal,
         avg-entry: option<decimal>,
         realized-pnl: decimal,
+    }
+
+    /// One exchange the strategy trades (one per venue), as the host knows it now.
+    record exchange-view {
+        /// The venue: what its intents and events carry.
+        venue: string,
+        /// The markets declared on it; an intent for another symbol is refused.
+        markets: list<market-view>,
         /// The strategy's resting orders from a venue read just made; none when the list is
         /// unknown or stale (a strategy must not treat a level as gone then).
         open-orders: option<list<order>>,
         /// The venue's positions from the same read as `open-orders`, with the same freshness;
-        /// none otherwise. A strategy sizes its closes and reconciles its inventory on this.
+        /// none otherwise (unknown is never flat). A strategy sizes its closes and reconciles its
+        /// inventory on this.
         positions: option<list<position>>,
         /// The venue stream reconnected since the strategy last saw a tick: events may have been
         /// missed, so a strategy reconciles against `open-orders` and `positions` now. True on
@@ -217,9 +210,6 @@ interface adapter {
         /// The venue refuses orders (why), e.g. a stale oracle on its side: a strategy stops
         /// quoting until this is none again.
         venue-halt: option<string>,
-        market: market-facts,
-        /// Every other leg the host was given; empty for a strategy on one symbol.
-        legs: list<leg-view>,
         /// The host's own order path refuses new orders (why): its stop, not the venue's.
         /// Refusals it causes are not the venue's rejections.
         path-stop: option<string>,
@@ -229,19 +219,31 @@ interface adapter {
         read-started-ms: option<u64>,
     }
 
-    /// An intent on one leg: a leg holds no leg and makes no request (a request names its leg).
-    variant leg-intent {
+    /// What the host shows the strategy on every call.
+    record view {
+        /// The bot's clock, Unix milliseconds.
+        now-ms: u64,
+        /// Every exchange the strategy declared, one per venue; `bullet` is always one of them.
+        exchanges: list<exchange-view>,
+    }
+
+    /// An intent on one exchange: an exchange holds no exchange and makes no request (a request
+    /// names its exchange).
+    variant exchange-intent {
         place(new-order),
         cancel(cancel-order),
-        cancel-all,
+        /// Cancel every order on this symbol, or on every market of the exchange when none.
+        cancel-all(option<string>),
         amend(amend-order),
+        /// Close the venue's position in each of these symbols (reduce-only IOCs at the touch,
+        /// capped from mid); succeeds only when each reads flat again.
         flatten(list<string>),
     }
 
-    record on-leg {
-        /// One of the host's legs, or `trade` for the one it was built over.
-        leg: string,
-        intent: leg-intent,
+    record on-exchange {
+        /// One of the strategy's exchanges, by venue.
+        exchange: string,
+        intent: exchange-intent,
     }
 
     record book-query {
@@ -255,7 +257,7 @@ interface adapter {
         start-ms: s64,
     }
 
-    /// A read of a leg's venue.
+    /// A read of an exchange's venue.
     variant read-query {
         positions,
         /// The orders resting on `symbol`: what frees a level whose order never landed.
@@ -270,7 +272,7 @@ interface adapter {
         refresh-metadata,
     }
 
-    /// What a request asks of the host. Every write passes the leg's gate.
+    /// What a request asks of the host. Every write passes the exchange's gate.
     variant venue-call {
         read(read-query),
         place(list<new-order>),
@@ -286,24 +288,17 @@ interface adapter {
     /// `event::answer` under the same `id` (the strategy picks it; one in flight is never reused).
     record request {
         id: u64,
-        /// One of the host's legs, or `trade`.
-        leg: string,
+        /// One of the strategy's exchanges, by venue.
+        exchange: string,
         call: venue-call,
     }
 
     /// What a strategy asks the host to do. Every order passes the host's gate.
     variant intent {
-        place(new-order),
-        cancel(cancel-order),
-        cancel-all,
-        amend(amend-order),
+        /// An intent on one of the strategy's exchanges, through that exchange's gate.
+        on(on-exchange),
         /// Stop the bot, with the reason.
         shutdown(string),
-        /// An intent on one of the host's legs, through that leg's gate.
-        leg(on-leg),
-        /// Close the venue's position in each of these symbols (reduce-only IOCs at the touch,
-        /// capped from mid); succeeds only when each reads flat again.
-        flatten(list<string>),
         request(request),
     }
 
@@ -321,18 +316,20 @@ interface adapter {
         error: string,
     }
 
-    /// Something on one leg: the leg's books, marks and positions are in the view's `legs`.
-    variant leg-event-kind {
+    /// Something in one market: its book, mark and position are in the view's exchanges.
+    variant market-event-kind {
+        /// The book changed; the book is in the view.
         book,
+        /// The venue's mark price.
         mark(decimal),
         fill(trade),
         order(order),
     }
 
-    record leg-event {
-        leg: string,
+    record market-event {
+        exchange: string,
         symbol: string,
-        event: leg-event-kind,
+        event: market-event-kind,
     }
 
     /// What a venue call came back with.
@@ -368,15 +365,9 @@ interface adapter {
 
     /// Something that happened.
     variant event {
-        /// The book changed; the book is in the view.
-        book,
-        /// The venue's mark price for the host's symbol.
-        mark(decimal),
-        fill(trade),
-        order(order),
+        market(market-event),
         tick,
         outcome(outcome),
-        leg(leg-event),
         answer(answer),
         unknown(unknown),
     }
@@ -470,10 +461,8 @@ interface adapter {
         required: bool,
     }
 
-    /// A leg the strategy needs besides the one it trades: the host refuses to start it without
-    /// a leg of this id on this venue.
-    record leg-need {
-        id: string,
+    /// An exchange the strategy trades: the host refuses to start it unless this venue is set up.
+    record exchange-need {
         venue: string,
     }
 
@@ -486,7 +475,8 @@ interface adapter {
         settings: list<setting>,
         /// The JSON schema of the settings `init` takes, as JSON text.
         settings-schema: string,
-        legs: list<leg-need>,
+        /// One per venue; `bullet` must be one of them, or the host refuses the component.
+        exchanges: list<exchange-need>,
     }
 
     /// A candle's length.

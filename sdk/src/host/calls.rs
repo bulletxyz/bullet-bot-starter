@@ -1,6 +1,6 @@
 //! Venue calls a strategy asks the host to make for it ([`Intent::Request`](crate::Intent)): a
 //! read, a write, or a wait on the bot's clock. The host carries each out between events, through
-//! the named leg's gate, bounded by a deadline, and answers it exactly once
+//! the named exchange's gate, bounded by a deadline, and answers it exactly once
 //! ([`Event::Answer`](crate::Event)) under the request's id. The bot's host reads the same types.
 
 use std::any::Any;
@@ -15,7 +15,7 @@ use crate::types::{
     OrderBook, OrderResult, Position,
 };
 
-/// A read of the leg's venue.
+/// A read of the exchange's venue.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReadQuery {
     Positions,
@@ -46,7 +46,7 @@ pub enum ReadQuery {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VenueCall {
     Read(ReadQuery),
-    /// New orders, as one batch on the leg's gate.
+    /// New orders, as one batch on the exchange's gate.
     Place(Vec<NewOrder>),
     Cancel(Vec<CancelOrder>),
     Amend(Vec<AmendOrder>),
