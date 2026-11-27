@@ -23,6 +23,10 @@ plugins built with 0.6 do not load on it, and plugins built with 0.7 need a bot 
 - The owner page's `profile::ExchangeNeed` is now `ExchangeRole`.
 - `testing::Market` holds `exchanges` (`testing::exchange`, `testing::market`); `fill_on(exchange, order)`.
 
+**Added**
+- `View::sole_market(venue)`: the one market declared on an exchange.
+- `testing`: `Market::bullet_mut`, `main_mut`, `set_book`, and `on_bullet(symbol, event)`.
+
 ## 0.6.0
 
 The strategy port now carries what the built-in strategies need, so the bot registers them with no

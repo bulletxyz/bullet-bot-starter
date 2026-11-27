@@ -37,7 +37,7 @@ impl Model {
             timestamp: None,
         };
         let delay = if self.late { 14 } else { 6 };
-        self.later(Event::Fill(trade), Told::Trade(id.clone(), q), delay);
+        self.later(on_bullet(SYM, MarketEvent::Fill(trade)), Told::Trade(id.clone(), q), delay);
         if full {
             // Sometimes the Filled event is lost: the trades alone must free the level.
             if self.rng.chance(15) {
@@ -109,7 +109,7 @@ impl Model {
         };
         self.queue.push(Queued {
             due: self.step + 6,
-            event: Event::Fill(trade),
+            event: on_bullet(SYM, MarketEvent::Fill(trade)),
             told: Told::Trade(id.clone(), q),
         });
         let was = self.chaos;
@@ -153,10 +153,16 @@ impl Model {
             })
             .collect();
         let listed = open.iter().filter_map(|o| o.client_id.clone()).collect();
-        self.market.open_orders = Some(open);
-        self.market.read_started_ms = Some(started);
+        self.read(Some(open), Some(started));
         self.deliver(&Event::Tick, &Told::Read(started, listed));
-        self.market.open_orders = Some(Vec::new());
-        self.market.read_started_ms = None;
+        self.read(Some(Vec::new()), None);
+    }
+
+    /// What Bullet's next view lists, and when that read started.
+    fn read(&mut self, open: Option<Vec<Order>>, started: Option<u64>) {
+        if let Some(bullet) = self.market.bullet_mut() {
+            bullet.open_orders = open;
+            bullet.read_started_ms = started;
+        }
     }
 }

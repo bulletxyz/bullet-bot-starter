@@ -19,8 +19,8 @@
 //! - `Control` and `Closed`: `adapter/control.rs`.
 
 use bb_strategy_sdk::{
-    CancelOrder, Event, Intent, Order, OrderBook, OrderStatus, Side, SnapshotExtras,
-    StrategyAdapter, StrategyError, View,
+    BULLET, CancelOrder, Event, ExchangeIntent, ExchangeView, Intent, MarketEvent, Order,
+    OrderBook, OrderStatus, Side, SnapshotExtras, StrategyAdapter, StrategyError, View,
 };
 use bb_strategy_support::ClientIdIssuer;
 use rust_decimal::Decimal;
@@ -176,6 +176,35 @@ impl MarketMaker {
         &self.settings.symbol
     }
 
+    /// Bullet as the host shows it: the exchange its market is on.
+    pub(crate) fn bullet<'v>(view: &'v View<'_>) -> Option<&'v ExchangeView> {
+        view.exchange(BULLET)
+    }
+
+    /// Its market as the host shows it: `symbol` on Bullet.
+    pub(crate) fn shown<'v>(&self, view: &'v View<'_>) -> Option<&'v bb_strategy_sdk::MarketView> {
+        view.market(BULLET, self.symbol())
+    }
+
+    /// The host's position in its market (zero when the market is not shown).
+    pub(crate) fn position(&self, view: &View<'_>) -> Decimal {
+        self.shown(view).map_or(Decimal::ZERO, |m| m.position)
+    }
+
+    pub(crate) fn book<'v>(&self, view: &'v View<'_>) -> Option<&'v OrderBook> {
+        self.shown(view).and_then(bb_strategy_sdk::MarketView::book)
+    }
+
+    /// `intent` on Bullet, where its market is.
+    pub(crate) fn on_bullet(intent: ExchangeIntent) -> Intent {
+        Intent::on(BULLET, intent)
+    }
+
+    /// The pull: only its own orders on its market.
+    pub(crate) fn cancel_own(&self) -> Intent {
+        Self::on_bullet(ExchangeIntent::CancelOwn(Some(self.symbol().to_string())))
+    }
+
     pub(crate) fn caps(&self, view: &View<'_>) -> Caps {
         Caps::new(&self.settings, view.limits.as_ref(), self.step)
     }
@@ -184,9 +213,8 @@ impl MarketMaker {
     pub(crate) fn stopped(&self, view: &View<'_>) -> bool {
         self.paused
             || self.closing.is_some()
-            || view.path_stop.is_some()
             || view.stop.is_some()
-            || view.venue_halt.is_some()
+            || Self::bullet(view).is_some_and(|e| e.path_stop.is_some() || e.venue_halt.is_some())
     }
 
     fn quoting(&self) -> bool {
@@ -202,23 +230,26 @@ impl MarketMaker {
         self.last_event_ms = Some(view.now_ms);
         self.halted = self.stopped(view);
         let caps = self.caps(view);
-        self.fair = self.pricing.fair(&market_view(&self.params, caps, self.tick, view));
+        let mv = market_view(&self.params, caps, self.tick, view, &self.settings.symbol);
+        self.fair = self.pricing.fair(&mv);
     }
 }
 
-/// What the pricing sees of `view`: a book only when it has two sides.
+/// What the pricing sees of `symbol` on Bullet in `view`: a book only when it has two sides.
 pub(crate) fn market_view<'a>(
     params: &'a MmParams,
     caps: Caps,
     tick: Option<Decimal>,
-    view: &View<'a>,
+    view: &'a View<'_>,
+    symbol: &str,
 ) -> MarketView<'a> {
-    let book = view.book.filter(|b| b.midpoint().is_some());
+    let shown = view.market(BULLET, symbol);
+    let book = shown.and_then(bb_strategy_sdk::MarketView::book).filter(|b| b.midpoint().is_some());
     MarketView {
         book,
         mid: book.and_then(OrderBook::midpoint),
         now_ms: view.now_ms,
-        net_position: view.position,
+        net_position: shown.map_or(Decimal::ZERO, |m| m.position),
         max_position: caps.max_position,
         params,
         tick,
@@ -229,35 +260,51 @@ impl StrategyAdapter for MarketMaker {
     type Report = MarketMakerReport;
 
     fn start(&mut self, view: &View<'_>) -> Result<Vec<Intent>, StrategyError> {
+        let Some(shown) = self.shown(view) else {
+            return Err(StrategyError(format!(
+                "The host shows no {} market on {BULLET}: the market maker quotes only that one.",
+                self.symbol()
+            )));
+        };
         self.client_ids = ClientIdIssuer::own(view.now_ms);
-        self.tick = view.market.tick_size;
-        self.step = view.market.step_size;
+        self.tick = shown.facts.tick_size;
+        self.step = shown.facts.step_size;
         // The book the host holds at start is the pricing's first.
         let caps = self.caps(view);
-        self.pricing.on_book(&market_view(&self.params, caps, self.tick, view));
+        let mv = market_view(&self.params, caps, self.tick, view, &self.settings.symbol);
+        self.pricing.on_book(&mv);
         self.seen(view);
         Ok(Vec::new())
     }
 
     fn on_event(&mut self, event: &Event, view: &View<'_>) -> Vec<Intent> {
-        self.tick = view.market.tick_size.or(self.tick);
-        self.step = view.market.step_size.or(self.step);
+        let facts = self.shown(view).map(|m| &m.facts);
+        self.tick = facts.and_then(|f| f.tick_size).or(self.tick);
+        self.step = facts.and_then(|f| f.step_size).or(self.step);
         let intents = match event {
-            Event::Book => self.on_book(view),
+            Event::Market { exchange, symbol, event }
+                if exchange == BULLET && symbol == self.symbol() =>
+            {
+                match event {
+                    MarketEvent::Book => self.on_book(view),
+                    MarketEvent::Order(order) => {
+                        self.on_order(order);
+                        Vec::new()
+                    }
+                    // The host keeps the inventory, and an order's terminal update ends its slot.
+                    MarketEvent::Fill(_) | MarketEvent::Mark(_) => Vec::new(),
+                }
+            }
             Event::Tick => {
-                if let Some(open) = view.open_orders {
+                if let Some(open) = Self::bullet(view).and_then(|e| e.open_orders.as_deref()) {
                     self.on_read(open, view);
                 }
                 self.refresh(view)
             }
             Event::Reference(price) => {
                 let caps = self.caps(view);
-                let mv = market_view(&self.params, caps, self.tick, view);
+                let mv = market_view(&self.params, caps, self.tick, view, &self.settings.symbol);
                 self.pricing.on_reference(price, &mv);
-                Vec::new()
-            }
-            Event::Order(order) => {
-                self.on_order(order);
                 Vec::new()
             }
             Event::Outcome { intent, result } => self.on_outcome(intent, result, view),
@@ -268,11 +315,9 @@ impl StrategyAdapter for MarketMaker {
             }
             Event::Control { id, cmd } => self.on_control(*id, cmd, view),
             Event::Closed { id, report } => self.on_closed(*id, report),
-            // The host keeps the inventory, and an order's terminal update ends its slot.
-            Event::Fill(_)
-            | Event::Mark(_)
+            // Another market is not its own; it asks nothing it waits on.
+            Event::Market { .. }
             | Event::Persisted { .. }
-            | Event::Leg { .. }
             | Event::Answer { .. }
             | Event::MarketView(_) => Vec::new(),
         };

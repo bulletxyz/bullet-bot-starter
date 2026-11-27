@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use bb_strategy_sdk::profile::{Amounts, PresetMarket, money, text};
 use bb_strategy_sdk::{
-    About, Describe, Descriptor, ExchangeNeed, Featured, FromSettings, Preset, Profile, Risk,
-    RiskLevel, SettingSpec, StrategyError, ValidateConfig,
+    About, BULLET, Describe, Descriptor, ExchangeNeed, ExchangeRole, Featured, FromSettings,
+    Preset, Profile, Risk, RiskLevel, SettingSpec, StrategyError, ValidateConfig,
 };
 use rust_decimal::Decimal;
 
@@ -23,7 +23,7 @@ impl Describe for GridStrategy {
                 .into(),
             settings: crate::config::settings().iter().map(SettingSpec::from).collect(),
             settings_schema: schemars::schema_for!(GridConfig),
-            legs: Vec::new(),
+            exchanges: vec![ExchangeNeed::new(BULLET)],
         }
     }
 
@@ -48,7 +48,7 @@ impl Describe for GridStrategy {
             settings: crate::config::settings(),
             supports_paper: true,
             has_loss_stop: true,
-            exchanges: vec![ExchangeNeed {
+            exchanges: vec![ExchangeRole {
                 role: "venue",
                 setting: Some("exchange"),
                 default: "bullet",

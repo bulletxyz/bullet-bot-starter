@@ -1,4 +1,6 @@
-use bb_strategy_sdk::{Intent, Order, OrderBook, OrderStatus, View};
+use bb_strategy_sdk::{BULLET, Intent, Order, OrderBook, OrderStatus, View};
+
+use rust_decimal::Decimal;
 
 use crate::adapter::{GridStrategy, Seen};
 use crate::levels::{FillOutcome, LevelState};
@@ -6,11 +8,12 @@ use crate::levels::{FillOutcome, LevelState};
 impl GridStrategy {
     pub(super) fn see(&mut self, view: &View<'_>) {
         self.age_note(view.now_ms);
+        let market = self.market(view);
         self.seen = Seen {
-            mid: view.book.and_then(OrderBook::midpoint).or(self.seen.mid),
-            position: view.position,
-            avg_entry: view.avg_entry,
-            realized: view.realized_pnl,
+            mid: self.book(view).and_then(OrderBook::midpoint).or(self.seen.mid),
+            position: self.position(view),
+            avg_entry: market.and_then(|m| m.avg_entry),
+            realized: market.map_or(Decimal::ZERO, |m| m.realized_pnl),
         };
     }
 
@@ -35,7 +38,7 @@ impl GridStrategy {
             side = %event.side,
             price = %event.price,
             qty = %event.quantity,
-            net_pos = %view.position,
+            net_pos = %self.position(view),
             "Grid fill"
         );
         if let FillOutcome::Complete { rearm: Some((to, side)) } =
@@ -89,14 +92,15 @@ impl GridStrategy {
             return halted;
         }
         let mut intents = Vec::new();
-        if let Some(mid) = view.book.and_then(OrderBook::midpoint) {
-            intents.extend(self.handle_range(mid, view.position, view.now_ms));
+        if let Some(mid) = self.book(view).and_then(OrderBook::midpoint) {
+            intents.extend(self.handle_range(mid, self.position(view), view.now_ms));
         }
         intents.extend(self.handle_trend_filter(view));
         // With no venue read this tick, the levels keep their state: a stale list would show
         // every level as gone and the grid would place it all again.
-        if let Some(live) = view.open_orders {
-            let read_ms = view.read_started_ms.unwrap_or(view.now_ms);
+        let bullet = view.exchange(BULLET);
+        if let Some(live) = bullet.and_then(|b| b.open_orders.as_deref()) {
+            let read_ms = bullet.and_then(|b| b.read_started_ms).unwrap_or(view.now_ms);
             let missing = self.reconcile_missing_orders(live, read_ms);
             if missing > 0 {
                 tracing::warn!(missing, "Detected missing grid orders");
@@ -106,8 +110,8 @@ impl GridStrategy {
         intents.extend(self.place_pending_orders(view));
         tracing::info!(
             active = self.state.active_count(),
-            net_pos = %view.position,
-            pnl = %view.realized_pnl,
+            net_pos = %self.position(view),
+            pnl = %self.seen.realized,
             paused = self.paused(),
             "Grid tick"
         );

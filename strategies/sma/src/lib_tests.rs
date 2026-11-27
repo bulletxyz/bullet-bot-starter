@@ -28,7 +28,7 @@ fn loaded(closes: &[&str]) -> Warmup {
 /// A tick at `now_ms` over a `bid` / `ask` book.
 fn tick(host: &mut SimHost<Sma>, now_ms: u64, bid: &str, ask: &str) {
     host.market.now_ms = now_ms;
-    host.market.book = Some(book(bid, ask, "1"));
+    host.market.set_book(Some(book(bid, ask, "1")));
     assert!(host.send(&Event::Tick).is_empty(), "it places nothing");
 }
 

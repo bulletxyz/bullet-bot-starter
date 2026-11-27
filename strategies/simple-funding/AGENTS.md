@@ -183,7 +183,8 @@ funding (RAY, LIT, UNITREE, TIA here) to have a long side at all.
 
 The bot runs simple-funding behind its strategy host as a plain `StrategyAdapter` (`SimpleFunding`: its flows run
 on a std-only poller over `Intent::Request` / `Event::Answer`, `src/adapter/io.rs`, `src/adapter.rs`; alerts are
-`Intent::Notify`), with one leg holding the whole universe. So, on top of the rules above:
+`Intent::Notify`), with its one exchange, Bullet, holding the whole universe as its markets. So, on top of the
+rules above:
 - every order passes the host's order path (the hard limits, the account's halt and notional cap, which counts the
   universe's gross) and the stale-price stop;
 - the host's daily loss stop is the one stop (its limit takes this strategy's `daily_loss_usd`): a trip stops new

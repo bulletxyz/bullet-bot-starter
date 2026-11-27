@@ -2,10 +2,10 @@
 
 #![expect(clippy::arithmetic_side_effects, reason = "test arithmetic")]
 
-use bb_strategy_sdk::testing::{Market, d, outcome};
+use bb_strategy_sdk::testing::{Market, SimHost, d, on_bullet, outcome};
 use bb_strategy_sdk::{
-    AmendOrder, CancelOrder, Event, FromSettings, Intent, NewOrder, Order, OrderStatus, OrderType,
-    Side, StrategyAdapter,
+    AmendOrder, BULLET, CancelOrder, Event, ExchangeIntent, FromSettings, Intent, MarketEvent,
+    NewOrder, Order, OrderStatus, OrderType, Side, StrategyAdapter,
 };
 use serde_json::{Value, json};
 
@@ -38,7 +38,7 @@ impl Rig {
         }
         let mut mm = MarketMaker::from_settings(&settings.to_string()).unwrap();
         let mut m = Market::new("BTC-USD", "99", "101", T0);
-        m.position = d(position);
+        m.main_mut().unwrap().position = d(position);
         assert_eq!(mm.start(&m.view()).unwrap(), Vec::new(), "nothing at start");
         Self { mm, m, orders: 0 }
     }
@@ -48,8 +48,8 @@ impl Rig {
     }
 
     pub fn book(&mut self, bid: &str, ask: &str) -> Vec<Intent> {
-        self.m.book = Some(bb_strategy_sdk::testing::book(bid, ask, "10"));
-        self.send(&Event::Book)
+        self.m.set_book(Some(bb_strategy_sdk::testing::book(bid, ask, "10")));
+        self.send(&book_event())
     }
 
     pub fn wait(&mut self, ms: u64) {
@@ -61,12 +61,13 @@ impl Rig {
         let mut next = Vec::new();
         for intent in intents {
             let id = match intent {
-                Intent::Place(_) | Intent::Amend(_) => {
+                Intent::On { intent: ExchangeIntent::Place(_), .. }
+                | Intent::On { intent: ExchangeIntent::Amend(_), .. } => {
                     self.orders += 1;
                     format!("v-{}", self.orders)
                 }
-                Intent::Cancel(c) => c.order_id.clone(),
-                Intent::CancelOwn => String::new(),
+                Intent::On { intent: ExchangeIntent::Cancel(c), .. } => c.order_id.clone(),
+                Intent::On { intent: ExchangeIntent::CancelOwn(_), .. } => String::new(),
                 _ => continue,
             };
             next.extend(self.send(&outcome(intent, Ok(&id))));
@@ -84,8 +85,29 @@ impl Rig {
     }
 }
 
+pub(crate) fn on(intent: ExchangeIntent) -> Intent {
+    Intent::on(BULLET, intent)
+}
+
+/// The pull: the market maker's own orders on BTC-USD.
+pub(crate) fn pull() -> Intent {
+    on(ExchangeIntent::CancelOwn(Some("BTC-USD".into())))
+}
+
+fn cancel_of(cancel: CancelOrder) -> Intent {
+    on(ExchangeIntent::Cancel(cancel))
+}
+
+fn book_event() -> Event {
+    on_bullet("BTC-USD", MarketEvent::Book)
+}
+
+fn order_event(order: Order) -> Event {
+    on_bullet("BTC-USD", MarketEvent::Order(order))
+}
+
 pub(crate) fn place(side: Side, price: &str, qty: &str, cid: &str) -> Intent {
-    Intent::Place(NewOrder {
+    on(ExchangeIntent::Place(NewOrder {
         symbol: "BTC-USD".into(),
         side,
         order_type: OrderType::PostOnly,
@@ -94,7 +116,7 @@ pub(crate) fn place(side: Side, price: &str, qty: &str, cid: &str) -> Intent {
         client_id: Some(cid.into()),
         reduce_only: false,
         protect: None,
-    })
+    }))
 }
 
 fn cancel(oid: &str, cid: &str) -> CancelOrder {
@@ -103,10 +125,11 @@ fn cancel(oid: &str, cid: &str) -> CancelOrder {
 
 fn cid_of(intent: &Intent) -> String {
     match intent {
-        Intent::Place(o) | Intent::Amend(AmendOrder { new_order: o, .. }) => {
+        Intent::On { intent: ExchangeIntent::Place(o), .. }
+        | Intent::On { intent: ExchangeIntent::Amend(AmendOrder { new_order: o, .. }), .. } => {
             o.client_id.clone().unwrap()
         }
-        Intent::Cancel(c) => c.client_id.clone().unwrap(),
+        Intent::On { intent: ExchangeIntent::Cancel(c), .. } => c.client_id.clone().unwrap(),
         other => panic!("no client id: {other:?}"),
     }
 }
@@ -127,6 +150,19 @@ fn order(oid: &str, cid: &str, side: Side, status: OrderStatus) -> Order {
 
 /// The first book quotes both sides at the fair value ± the spreads; the answers make them the
 /// slots, with the venue's ids.
+/// The market maker quotes its own symbol: a Bullet that shows another market is not a start.
+#[test]
+fn start_refuses_without_its_market_on_bullet() {
+    let settings = json!({
+        "symbol": "BTC-USD", "bid_spread_bps": "10", "ask_spread_bps": "10",
+        "order_size": "0.1", "max_position": "1", "fair_value": "bullet",
+    });
+    let mm = MarketMaker::from_settings(&settings.to_string()).unwrap();
+    let mut sim = SimHost::new(mm, Market::new("ETH-USD", "99", "101", T0));
+    assert!(sim.start().unwrap_err().0.contains("no BTC-USD market"));
+    assert_eq!(sim.sent, Vec::new(), "nothing sent");
+}
+
 #[test]
 fn the_first_book_places_both_sides_and_their_answers_make_the_slots() {
     let mut r = Rig::new(&json!({}));
@@ -195,7 +231,13 @@ fn a_small_drift_keeps_the_quotes_and_a_large_one_amends_both() {
     assert!(r.book("99.02", "101.02").is_empty(), "2 bps: under the threshold");
     r.wait(2_000);
     let sent = r.book("99.1", "101.1");
-    let [Intent::Amend(b), Intent::Amend(a)] = sent.as_slice() else { panic!("{sent:?}") };
+    let [
+        Intent::On { intent: ExchangeIntent::Amend(b), .. },
+        Intent::On { intent: ExchangeIntent::Amend(a), .. },
+    ] = sent.as_slice()
+    else {
+        panic!("{sent:?}")
+    };
     assert_eq!((b.cancel.clone(), a.cancel.clone()), (cancel("v-1", &bid), cancel("v-2", &ask)));
     assert_eq!((b.new_order.price, a.new_order.price), (d("99.9999"), d("100.2001")));
     r.take(&sent);
@@ -225,7 +267,7 @@ fn the_side_that_would_grow_past_the_cap_is_not_quoted() {
         let sides: Vec<_> = sent
             .iter()
             .map(|i| match i {
-                Intent::Place(o) => o.side,
+                Intent::On { intent: ExchangeIntent::Place(o), .. } => o.side,
                 other => panic!("{other:?}"),
             })
             .collect();
@@ -241,10 +283,10 @@ fn a_quote_the_position_has_outgrown_is_cancelled() {
     let sent = r.book("99", "101");
     let bid = cid_of(&sent[0]);
     r.take(&sent);
-    r.m.position = d("0.95");
+    r.m.main_mut().unwrap().position = d("0.95");
     r.wait(1_000);
     let sent = r.book("99", "101");
-    assert_eq!(sent, [Intent::Cancel(cancel("v-1", &bid))]);
+    assert_eq!(sent, [cancel_of(cancel("v-1", &bid))]);
     r.take(&sent);
     assert!(r.slot(Side::Buy).is_none());
 }
@@ -262,11 +304,18 @@ fn near_the_cap_a_reprice_cancels_first_and_places_on_the_answer() {
         let old = r.slot(near).unwrap().clone();
         r.wait(1_000);
         let sent = r.book("99.5", "101.5");
-        let cancels: Vec<_> = sent.iter().filter(|i| matches!(i, Intent::Cancel(_))).collect();
-        assert_eq!(cancels, [&Intent::Cancel(old.cancel("BTC-USD"))], "{sent:?}");
-        assert!(sent.iter().any(|i| matches!(i, Intent::Amend(a) if a.new_order.side == far)));
+        let cancels: Vec<_> = sent
+            .iter()
+            .filter(|i| matches!(i, Intent::On { intent: ExchangeIntent::Cancel(_), .. }))
+            .collect();
+        assert_eq!(cancels, [&cancel_of(old.cancel("BTC-USD"))], "{sent:?}");
+        assert!(sent.iter().any(|i| {
+            matches!(i, Intent::On { intent: ExchangeIntent::Amend(a), .. } if a.new_order.side == far)
+        }));
         let after = r.take(&sent);
-        let [Intent::Place(new)] = after.as_slice() else { panic!("{after:?}") };
+        let [Intent::On { intent: ExchangeIntent::Place(new), .. }] = after.as_slice() else {
+            panic!("{after:?}")
+        };
         assert_eq!((new.side, new.quantity), (near, d("0.1")));
         r.take(&after);
         assert_eq!(r.slot(near).unwrap().client_id, new.client_id.clone().unwrap());
@@ -281,7 +330,7 @@ fn a_fill_during_a_two_step_reprice_recaps_its_replacement() {
     r.take(&sent);
     r.wait(1_000);
     let sent = r.book("99.5", "101.5");
-    r.m.position = d("0.95");
+    r.m.main_mut().unwrap().position = d("0.95");
     assert!(r.take(&sent).is_empty(), "the bid would grow the position past the cap");
 }
 
@@ -293,7 +342,7 @@ fn a_stop_during_a_two_step_reprice_places_no_replacement() {
     r.take(&sent);
     r.wait(1_000);
     let sent = r.book("99.5", "101.5");
-    r.m.path_stop = Some("stale price".into());
+    r.m.bullet_mut().unwrap().path_stop = Some("stale price".into());
     assert!(r.take(&sent).is_empty());
 }
 
@@ -311,21 +360,24 @@ fn an_unknown_place_holds_its_side_until_a_read_settles_it() {
     assert!(r.mm.wants_venue(r.m.now_ms, false), "a read settles it");
     r.wait(1_000);
     let sent = r.book("99.5", "101.5");
-    assert!(sent.contains(&Intent::Cancel(cancel("", &bid))), "{sent:?}");
-    assert!(!sent.iter().any(|i| matches!(i, Intent::Place(o) if o.side == Side::Buy)));
+    assert!(sent.contains(&cancel_of(cancel("", &bid))), "{sent:?}");
+    assert!(!sent.iter().any(
+        |i| matches!(i, Intent::On { intent: ExchangeIntent::Place(o), .. } if o.side == Side::Buy)
+    ));
     r.refuse(&sent[0], "not found");
     r.take(&sent[1..]);
 
     // A read within the margin keeps it; one past it frees the side.
     r.wait(500);
-    r.m.open_orders = Some(Vec::new());
-    r.m.read_started_ms = Some(r.m.now_ms);
+    r.m.bullet_mut().unwrap().open_orders = Some(Vec::new());
+    r.m.bullet_mut().unwrap().read_started_ms = Some(r.m.now_ms);
     r.send(&Event::Tick);
     assert!(r.slot(Side::Buy).is_some());
     r.wait(2_000);
-    r.m.read_started_ms = Some(r.m.now_ms);
+    r.m.bullet_mut().unwrap().read_started_ms = Some(r.m.now_ms);
     let sent = r.send(&Event::Tick);
-    assert!(sent.iter().any(|i| matches!(i, Intent::Place(o) if o.side == Side::Buy)), "{sent:?}");
+    let buys = |i: &Intent| matches!(i, Intent::On { intent: ExchangeIntent::Place(o), .. } if o.side == Side::Buy);
+    assert!(sent.iter().any(buys), "{sent:?}");
 }
 
 /// An unknown place the read lists rests after all: it takes the venue's id.
@@ -336,8 +388,9 @@ fn a_read_that_lists_an_unknown_place_adopts_it() {
     let bid = cid_of(&sent[0]);
     r.send(&Event::Unknown { intent: sent[0].clone(), error: "timeout".into() });
     r.wait(3_000);
-    r.m.open_orders = Some(vec![order("v-9", &bid, Side::Buy, OrderStatus::Open)]);
-    r.m.read_started_ms = Some(r.m.now_ms);
+    r.m.bullet_mut().unwrap().open_orders =
+        Some(vec![order("v-9", &bid, Side::Buy, OrderStatus::Open)]);
+    r.m.bullet_mut().unwrap().read_started_ms = Some(r.m.now_ms);
     r.send(&Event::Tick);
     let slot = r.slot(Side::Buy).unwrap();
     assert_eq!((slot.order_id.as_deref(), slot.unknown), (Some("v-9"), false));
@@ -354,11 +407,11 @@ fn a_failed_cancel_beside_its_amend_leaves_a_stray_that_blocks_placing() {
     r.wait(1_000);
     let sent = r.book("99.5", "101.5");
     r.take(&sent);
-    r.refuse(&Intent::Cancel(old.clone()), "rejected");
+    r.refuse(&cancel_of(old.clone()), "rejected");
     assert_eq!(r.mm.strays.len(), 1);
     // A fill took the ask: its side is empty, but nothing is placed while the stray may rest.
     let ask = r.slot(Side::Sell).unwrap().clone();
-    r.send(&Event::Order(order(
+    r.send(&order_event(order(
         ask.order_id.as_deref().unwrap(),
         &ask.client_id,
         Side::Sell,
@@ -366,11 +419,14 @@ fn a_failed_cancel_beside_its_amend_leaves_a_stray_that_blocks_placing() {
     )));
     r.wait(1_000);
     let sent = r.book("99.5", "101.5");
-    assert_eq!(sent, [Intent::Cancel(old)], "the stray first, no place");
+    assert_eq!(sent, [cancel_of(old)], "the stray first, no place");
     r.take(&sent);
     r.wait(1_000);
     let sent = r.book("99.5", "101.5");
-    assert!(matches!(sent.as_slice(), [Intent::Place(o)] if o.side == Side::Sell), "{sent:?}");
+    assert!(
+        matches!(sent.as_slice(), [Intent::On { intent: ExchangeIntent::Place(o), .. }] if o.side == Side::Sell),
+        "{sent:?}"
+    );
 }
 
 /// A stray that filled before its cancel landed is gone: its terminal update clears it.
@@ -383,9 +439,9 @@ fn a_stray_that_filled_blocks_nothing() {
     r.wait(1_000);
     let sent = r.book("99.5", "101.5");
     r.take(&sent);
-    r.refuse(&Intent::Cancel(old.cancel("BTC-USD")), "rejected");
+    r.refuse(&cancel_of(old.cancel("BTC-USD")), "rejected");
     let oid = old.order_id.clone().unwrap();
-    r.send(&Event::Order(order(&oid, &old.client_id, Side::Buy, OrderStatus::Filled)));
+    r.send(&order_event(order(&oid, &old.client_id, Side::Buy, OrderStatus::Filled)));
     assert!(r.mm.strays.is_empty());
 }
 
@@ -416,7 +472,11 @@ fn a_call_that_failed_as_a_whole_keeps_what_it_asked_about() {
     let old = r.slot(Side::Sell).unwrap().clone();
     r.wait(1_000);
     let sent = r.book("99.5", "101.5");
-    let amend = sent.iter().find(|i| matches!(i, Intent::Amend(_))).unwrap().clone();
+    let amend = sent
+        .iter()
+        .find(|i| matches!(i, Intent::On { intent: ExchangeIntent::Amend(_), .. }))
+        .unwrap()
+        .clone();
     r.send(&Event::Failed { intent: amend, error: "down".into() });
     assert_eq!(r.slot(Side::Sell), Some(&old));
 }
@@ -428,15 +488,16 @@ fn a_read_drops_a_quote_gone_from_the_venue_after_the_settle_margin() {
     let mut r = Rig::new(&json!({}));
     let sent = r.book("99", "101");
     r.take(&sent);
-    r.m.open_orders = Some(Vec::new());
-    r.m.read_started_ms = Some(r.m.now_ms + 1_000);
+    r.m.bullet_mut().unwrap().open_orders = Some(Vec::new());
+    r.m.bullet_mut().unwrap().read_started_ms = Some(r.m.now_ms + 1_000);
     r.wait(1_000);
     r.send(&Event::Tick);
     assert!(r.slot(Side::Buy).is_some(), "within the margin");
     r.wait(2_000);
-    r.m.read_started_ms = Some(r.m.now_ms);
+    r.m.bullet_mut().unwrap().read_started_ms = Some(r.m.now_ms);
     let bid = r.slot(Side::Buy).unwrap().clone();
-    r.m.open_orders = Some(vec![order("v-1", &bid.client_id, Side::Buy, OrderStatus::Open)]);
+    r.m.bullet_mut().unwrap().open_orders =
+        Some(vec![order("v-1", &bid.client_id, Side::Buy, OrderStatus::Open)]);
     r.send(&Event::Tick);
     assert!(r.slot(Side::Buy).is_some() && r.slot(Side::Sell).is_none());
 }
@@ -448,13 +509,13 @@ fn a_stop_pulls_once_and_the_first_book_after_it_quotes_at_once() {
     let mut r = Rig::new(&json!({ "refresh_secs": 60 }));
     let sent = r.book("99", "101");
     r.take(&sent);
-    r.m.path_stop = Some("the daily loss stop".into());
-    assert_eq!(r.book("99", "101"), [Intent::CancelOwn]);
+    r.m.bullet_mut().unwrap().path_stop = Some("the daily loss stop".into());
+    assert_eq!(r.book("99", "101"), [pull()]);
     assert!(r.book("99", "101").is_empty(), "asked once");
-    assert!(r.take(&[Intent::CancelOwn]).is_empty());
+    assert!(r.take(&[pull()]).is_empty());
     assert!(r.slot(Side::Buy).is_none() && r.slot(Side::Sell).is_none());
     assert!(r.book("99", "101").is_empty(), "nothing rests: nothing to pull");
-    r.m.path_stop = None;
+    r.m.bullet_mut().unwrap().path_stop = None;
     assert_eq!(r.book("99", "101").len(), 2, "within the cadence, but after a pull");
 }
 
@@ -464,14 +525,14 @@ fn a_failed_pull_is_asked_again_every_ten_seconds() {
     let mut r = Rig::new(&json!({}));
     let sent = r.book("99", "101");
     r.take(&sent);
-    r.m.venue_halt = Some("stale oracle".into());
-    let pull = r.send(&Event::Tick);
-    r.refuse(&pull[0], "down");
+    r.m.bullet_mut().unwrap().venue_halt = Some("stale oracle".into());
+    let first = r.send(&Event::Tick);
+    r.refuse(&first[0], "down");
     r.wait(5_000);
     assert!(r.send(&Event::Tick).is_empty());
     assert!(!r.mm.may_keep(), "a failing pull keeps nothing");
     r.wait(5_000);
-    assert_eq!(r.send(&Event::Tick), [Intent::CancelOwn]);
+    assert_eq!(r.send(&Event::Tick), [pull()]);
 }
 
 /// A book with no two sides is no price to quote around: what rests is pulled.
@@ -480,8 +541,10 @@ fn a_book_without_two_sides_pulls_the_quotes() {
     let mut r = Rig::new(&json!({}));
     let sent = r.book("99", "101");
     r.take(&sent);
-    r.m.book.as_mut().unwrap().asks.clear();
-    assert_eq!(r.send(&Event::Book), [Intent::CancelOwn]);
+    let mut one_sided = r.m.main_mut().unwrap().book.as_deref().unwrap().clone();
+    one_sided.asks.clear();
+    r.m.set_book(Some(one_sided));
+    assert_eq!(r.send(&book_event()), [pull()]);
 }
 
 /// The host's cancel of every order (its wind-down, its pause) empties the slots, and the next
@@ -503,7 +566,7 @@ fn an_open_update_gives_an_unknown_quote_its_venue_id() {
     let sent = r.book("99", "101");
     let bid = cid_of(&sent[0]);
     r.send(&Event::Unknown { intent: sent[0].clone(), error: "timeout".into() });
-    r.send(&Event::Order(order("v-7", &bid, Side::Buy, OrderStatus::Open)));
+    r.send(&order_event(order("v-7", &bid, Side::Buy, OrderStatus::Open)));
     assert_eq!(r.slot(Side::Buy).unwrap().order_id.as_deref(), Some("v-7"));
 }
 
@@ -538,11 +601,11 @@ fn on_the_simulated_host_it_quotes_fills_and_skews() {
     let mm = MarketMaker::from_settings(&settings.to_string()).unwrap();
     let mut host = SimHost::new(mm, Market::new("BTC-USD", "99", "101", T0));
     host.start().unwrap();
-    let first = host.send(&Event::Book);
+    let first = host.send(&book_event());
     let orders: Vec<NewOrder> = placed(&first).into_iter().cloned().collect();
     assert_eq!(orders.len(), 2);
     host.send(&fill_of(&orders[0]));
-    host.send(&Event::Order(Order {
+    host.send(&order_event(Order {
         id: "sim-1".into(),
         client_id: orders[0].client_id.clone(),
         filled_quantity: d("0.5"),
@@ -550,9 +613,12 @@ fn on_the_simulated_host_it_quotes_fills_and_skews() {
         ..order("sim-1", "", Side::Buy, OrderStatus::Filled)
     }));
     host.market.now_ms += 1_000;
-    let next = host.send(&Event::Book);
+    let next = host.send(&book_event());
     // Long 0.5 of 1 with 10 bps of skew: 5 bps lower; the bid is placed again, the ask amended.
     let bid = placed(&next).into_iter().find(|o| o.side == Side::Buy).cloned().unwrap();
     assert_eq!(bid.price, d("99.85"));
-    assert!(next.iter().any(|i| matches!(i, Intent::Amend(a) if a.new_order.price == d("100.05"))));
+    assert!(next.iter().any(|i| {
+        matches!(i, Intent::On { intent: ExchangeIntent::Amend(a), .. }
+            if a.new_order.price == d("100.05"))
+    }));
 }

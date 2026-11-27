@@ -30,7 +30,10 @@
 
 use std::collections::HashMap;
 
-use bb_strategy_sdk::{Event, Intent, Side, StrategyAdapter, StrategyError, View};
+use bb_strategy_sdk::{
+    BULLET, Event, ExchangeIntent, ExchangeView, Intent, MarketEvent, MarketView, OrderBook, Side,
+    StrategyAdapter, StrategyError, View,
+};
 use bb_strategy_support::ClientIdIssuer;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
@@ -83,6 +86,28 @@ impl AvellanedaStoikov {
         }
     }
 
+    /// Its market as the host shows it: `symbol` on Bullet.
+    pub(crate) fn shown<'v>(&self, view: &'v View<'_>) -> Option<&'v MarketView> {
+        view.market(BULLET, &self.config.symbol)
+    }
+
+    pub(crate) fn bullet<'v>(view: &'v View<'_>) -> Option<&'v ExchangeView> {
+        view.exchange(BULLET)
+    }
+
+    /// The host's position in its market (zero when the market is not shown).
+    pub(crate) fn position(&self, view: &View<'_>) -> Decimal {
+        self.shown(view).map_or(Decimal::ZERO, |m| m.position)
+    }
+
+    fn realized_pnl(&self, view: &View<'_>) -> Decimal {
+        self.shown(view).map_or(Decimal::ZERO, |m| m.realized_pnl)
+    }
+
+    pub(crate) fn book<'v>(&self, view: &'v View<'_>) -> Option<&'v OrderBook> {
+        self.shown(view).and_then(MarketView::book)
+    }
+
     pub(crate) fn uses_reference(&self) -> bool {
         self.config.reference_exchange.is_some()
     }
@@ -129,7 +154,7 @@ impl AvellanedaStoikov {
         // In single-venue mode the local book is the price source. In fair-value mode the
         // reference feed owns `last_mid` / volatility.
         if !self.uses_reference()
-            && let Some(m) = view.book.and_then(bb_strategy_sdk::OrderBook::midpoint)
+            && let Some(m) = self.book(view).and_then(OrderBook::midpoint)
         {
             self.last_mid = Some(m);
             if let Some(f) = m.to_f64() {
@@ -177,8 +202,9 @@ impl AvellanedaStoikov {
         };
         let mut intents = Vec::new();
         if self.in_flight.is_empty() {
-            if let Some(open) = view.open_orders
-                && self.reconcile_due(view.now_ms, view.reconnected)
+            if let Some(bullet) = Self::bullet(view)
+                && let Some(open) = bullet.open_orders.as_deref()
+                && self.reconcile_due(view.now_ms, bullet.reconnected)
             {
                 intents = self.reconcile_with_venue(open, view);
             }
@@ -190,8 +216,8 @@ impl AvellanedaStoikov {
         let best_bid = self.slots.iter().filter(|s| s.side == Side::Buy).map(|s| s.price).max();
         let top_ask = self.slots.iter().filter(|s| s.side == Side::Sell).map(|s| s.price).min();
         tracing::info!(
-            net_pos = %view.position,
-            pnl = %view.realized_pnl,
+            net_pos = %self.position(view),
+            pnl = %self.realized_pnl(view),
             slots = self.slots.len(),
             mid = ?self.last_mid.map(|p| p.to_string()),
             best_bid = ?best_bid.map(|p| p.to_string()),
@@ -211,15 +237,17 @@ impl StrategyAdapter for AvellanedaStoikov {
             .validate()
             .map_err(|e| StrategyError(format!("avellaneda-stoikov config invalid: {e}")))?;
         self.check_fee_floor()?;
+        if self.shown(view).is_none() {
+            return Err(StrategyError(format!("{} on {BULLET} is not shown", self.config.symbol)));
+        }
         // The host has cancelled the stale orders and seeded the inventory from the venue.
         self.client_ids = ClientIdIssuer::own(view.now_ms);
         // Seed mid/vol only in single-venue mode (in fair-value mode the reference feed owns
         // those).
         if !self.uses_reference() {
-            let mid =
-                view.book.and_then(bb_strategy_sdk::OrderBook::midpoint).ok_or_else(|| {
-                    StrategyError("No orderbook data available to compute mid price".into())
-                })?;
+            let mid = self.book(view).and_then(OrderBook::midpoint).ok_or_else(|| {
+                StrategyError("No orderbook data available to compute mid price".into())
+            })?;
             self.last_mid = Some(mid);
             if let Some(m) = mid.to_f64() {
                 self.volatility.push(m, view.now_ms);
@@ -228,7 +256,7 @@ impl StrategyAdapter for AvellanedaStoikov {
         tracing::info!(
             mode = if self.uses_reference() { "fair-value" } else { "single-venue" },
             reference = ?self.config.reference_exchange,
-            net_pos = %view.position,
+            net_pos = %self.position(view),
             gamma = %self.config.gamma,
             kappa = %self.config.kappa,
             tau = self.config.order_horizon_secs,
@@ -239,16 +267,23 @@ impl StrategyAdapter for AvellanedaStoikov {
 
     fn on_event(&mut self, event: &Event, view: &View<'_>) -> Vec<Intent> {
         match event {
-            Event::Book => self.on_book(view),
+            Event::Market { exchange, symbol, event }
+                if exchange == BULLET && *symbol == self.config.symbol =>
+            {
+                match event {
+                    MarketEvent::Book => self.on_book(view),
+                    MarketEvent::Fill(trade) => {
+                        self.on_fill(trade);
+                        Vec::new()
+                    }
+                    MarketEvent::Order(order) => {
+                        self.on_order(order);
+                        Vec::new()
+                    }
+                    MarketEvent::Mark(_) => Vec::new(),
+                }
+            }
             Event::Reference(price) => self.on_reference(price, view),
-            Event::Fill(trade) => {
-                self.on_fill(trade);
-                Vec::new()
-            }
-            Event::Order(order) => {
-                self.on_order(order);
-                Vec::new()
-            }
             Event::Tick => self.on_tick(view),
             Event::Outcome { intent, result } => {
                 self.on_outcome(intent, result, view.now_ms);
@@ -271,11 +306,11 @@ impl StrategyAdapter for AvellanedaStoikov {
         // shutdown, so cancel-only is correct for every reason including a feed failure.
         tracing::info!("Shutting down A-S — cancelling all orders");
         tracing::info!(
-            net_pos = %view.position,
-            pnl = %view.realized_pnl,
+            net_pos = %self.position(view),
+            pnl = %self.realized_pnl(view),
             "A-S final stats"
         );
-        vec![Intent::CancelAll]
+        vec![Intent::on(BULLET, ExchangeIntent::CancelAll(Some(self.config.symbol.clone())))]
     }
 
     fn report(&self) -> AvellanedaStoikovReport {

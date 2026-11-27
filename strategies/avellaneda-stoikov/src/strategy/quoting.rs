@@ -8,7 +8,8 @@
 )]
 
 use bb_strategy_sdk::{
-    AmendOrder, CancelOrder, Intent, NewOrder, OrderBook, OrderType, Side, View,
+    AmendOrder, BULLET, CancelOrder, ExchangeIntent, Intent, NewOrder, OrderBook, OrderType, Side,
+    View,
 };
 use rust_decimal::Decimal;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
@@ -218,13 +219,14 @@ impl AvellanedaStoikov {
         if !self.in_flight.is_empty() {
             return Vec::new();
         }
-        let Some((inner, rungs)) = self.build_ladder(mid, view.position) else {
+        let position = self.position(view);
+        let Some((inner, rungs)) = self.build_ladder(mid, position) else {
             tracing::debug!("Not enough volatility samples yet to quote");
             return Vec::new();
         };
 
-        let can_buy = view.position < self.config.max_position;
-        let can_sell = view.position > -self.config.max_position;
+        let can_buy = position < self.config.max_position;
+        let can_sell = position > -self.config.max_position;
 
         let mut targets: Vec<Target> = Vec::new();
         for rung in &rungs {
@@ -245,7 +247,7 @@ impl AvellanedaStoikov {
             }
         }
 
-        let plan = self.plan_orders(&targets, mid, view.book, now_ms);
+        let plan = self.plan_orders(&targets, mid, self.book(view), now_ms);
         if plan.is_empty() {
             // Everything within threshold and no add/remove churn: last_quote_at stays, so the
             // Tick fallback can still force a refresh once `order_refresh_secs` elapses.
@@ -257,15 +259,15 @@ impl AvellanedaStoikov {
         let mut intents = Vec::with_capacity(n_cancels + n_amends + n_places);
         self.slots = kept;
         for (cancel, slot) in cancels {
-            intents.push(Intent::Cancel(cancel));
+            intents.push(Intent::on(BULLET, ExchangeIntent::Cancel(cancel)));
             self.in_flight.push(InFlight::Cancel(slot));
         }
         for (amend, old, new) in amends {
-            intents.push(Intent::Amend(amend));
+            intents.push(Intent::on(BULLET, ExchangeIntent::Amend(amend)));
             self.in_flight.push(InFlight::Amend { old, new });
         }
         for (order, new) in places {
-            intents.push(Intent::Place(order));
+            intents.push(Intent::on(BULLET, ExchangeIntent::Place(order)));
             self.in_flight.push(InFlight::Place(new));
         }
         self.round = Some((now_ms, false));
@@ -279,7 +281,7 @@ impl AvellanedaStoikov {
             inner_ask = %Decimal::from_f64(inner.ask).unwrap_or_default(),
             reservation = %inner.reservation_price,
             inner_half_spread = %inner.half_spread,
-            net_pos = %view.position,
+            net_pos = %position,
             "A-S ladder refreshed"
         );
         intents

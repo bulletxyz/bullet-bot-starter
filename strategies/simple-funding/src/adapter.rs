@@ -1,6 +1,6 @@
 //! simple-funding as a plain [`StrategyAdapter`]: the strategy's flows (a tick's reads and orders,
 //! a start, a flatten) run on a poller with no runtime ([`io`]). Each venue call a flow
-//! makes leaves as an [`Intent::Request`] the host carries out through the leg's order path, and
+//! makes leaves as an [`Intent::Request`] the host carries out through the exchange's order path, and
 //! the flow resumes on its [`Event::Answer`]; its alerts and its day state leave as
 //! [`Intent::Notify`] and [`Intent::Persist`]. One flow runs at a time: an event that comes
 //! meanwhile waits its turn (ticks, marks and books of a symbol are coalesced to the latest).
@@ -11,7 +11,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
-use bb_strategy_sdk::{Event, Intent, OrderBook, StrategyAdapter, StrategyError, View};
+use bb_strategy_sdk::{
+    Event, Intent, MarketEvent, OrderBook, StrategyAdapter, StrategyError, View,
+};
 use rust_decimal::Decimal;
 
 use crate::VENUE;
@@ -29,7 +31,7 @@ enum Kind {
     Stop,
 }
 
-/// What the flows are shown: the leg's marks and books and the bot's ticks.
+/// What the flows are shown: the exchange's marks and books and the bot's ticks.
 enum Ev {
     Tick,
     Mark { symbol: String, price: Decimal, funding: Option<Decimal> },
@@ -53,15 +55,19 @@ impl SimpleFunding {
         Self { idle: Some(strategy), flow: None, queue: VecDeque::new(), shared, report }
     }
 
-    /// What the host shows now: the bot's time and the leg's facts.
-    fn see(&self, view: &View<'_>) {
+    /// What the host shows now: the bot's time and the exchange's facts. `false` when it shows no
+    /// exchange: no data, so the facts an earlier view showed are cleared, never acted on.
+    fn see(&self, view: &View<'_>) -> bool {
         let mut calls = self.shared.lock();
         calls.now_ms = view.now_ms;
-        if let Some(leg) = view.legs.iter().find(|l| l.venue == VENUE) {
-            calls.leg.clone_from(&leg.id);
-            calls.symbols.clone_from(&leg.symbols);
-            calls.market.clone_from(&leg.market);
+        let exchange = view.exchange(VENUE);
+        if let Some(exchange) = exchange {
+            calls.exchange.clone_from(&exchange.venue);
         }
+        let markets = exchange.map_or(&[][..], |e| e.markets.as_slice());
+        calls.symbols = markets.iter().map(|m| m.symbol.clone()).collect();
+        calls.market = markets.iter().map(|m| (m.symbol.clone(), m.facts.clone())).collect();
+        exchange.is_some()
     }
 
     /// `event` as the flows see it, queued (a newer tick, mark or book replaces the one waiting).
@@ -153,18 +159,16 @@ impl SimpleFunding {
 
     /// `event` from the host as the flows see it, if it is one.
     fn ev(event: &Event, view: &View<'_>) -> Option<Ev> {
-        let Event::Leg { leg, symbol, event } = event else {
+        let Event::Market { exchange, symbol, event } = event else {
             return matches!(event, Event::Tick).then_some(Ev::Tick);
         };
-        let at = view.legs.iter().find(|l| &l.id == leg)?;
-        match &**event {
-            Event::Mark(price) => Some(Ev::Mark {
-                symbol: symbol.clone(),
-                price: *price,
-                funding: at.funding_rates.get(symbol).copied(),
-            }),
-            Event::Book => {
-                Some(Ev::Book { symbol: symbol.clone(), book: Arc::clone(at.books.get(symbol)?) })
+        let at = view.market(exchange, symbol)?;
+        match event {
+            MarketEvent::Mark(price) => {
+                Some(Ev::Mark { symbol: symbol.clone(), price: *price, funding: at.funding_rate })
+            }
+            MarketEvent::Book => {
+                Some(Ev::Book { symbol: symbol.clone(), book: Arc::clone(at.book.as_ref()?) })
             }
             _ => None,
         }
@@ -188,14 +192,15 @@ impl StrategyAdapter for SimpleFunding {
     }
 
     fn on_event(&mut self, event: &Event, view: &View<'_>) -> Vec<Intent> {
-        self.see(view);
+        let shown = self.see(view);
         match event {
             Event::Answer { id, reply } => {
                 self.shared.answer(*id, Some(reply.clone().map_err(io::to_bot)));
             }
             Event::Persisted { id, result } => self.shared.persisted(*id, result.clone()),
+            // No exchange shown, no data: no new flow (an answer still reaches the one running).
             other => {
-                if let Some(event) = Self::ev(other, view) {
+                if shown && let Some(event) = Self::ev(other, view) {
                     self.queue(event);
                 }
             }
@@ -222,3 +227,7 @@ impl StrategyAdapter for SimpleFunding {
 }
 
 pub mod io;
+
+#[cfg(test)]
+#[path = "adapter_tests.rs"]
+mod tests;

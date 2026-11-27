@@ -26,7 +26,7 @@ the checkout, not file by file over the web.
 | Field | What |
 |---|---|
 | `now_ms` | The bot's clock (Unix ms). The only clock a strategy has. |
-| `exchanges` | One `ExchangeView` per venue the strategy declared, Bullet always among them. `view.exchange(venue)`, `view.market(venue, symbol)`. |
+| `exchanges` | One `ExchangeView` per venue the strategy declared, Bullet always among them. `view.exchange(venue)`, `view.market(venue, symbol)`; `view.sole_market(venue)` is the one market declared there (a strategy with no symbol setting trades Bullet's). |
 | `limits`, `stop` | The bot's built-ins only (`None` for a plugin): the hard limits the bot holds the orders to (live), and its own stop, typed (what `path_stop` says in words). |
 
 An `ExchangeView` (`BULLET` is `"bullet"`):
@@ -142,19 +142,20 @@ the bot's: don't report them.
 With the SDK's `testing` feature (a dev-dependency):
 
 ```rust
-use bb_strategy_sdk::testing::{Market, SimHost, book, d, fill_of, outcome, placed};
+use bb_strategy_sdk::testing::{Market, SimHost, book, d, fill_of, on_bullet, outcome, placed};
 
 let mut sim = SimHost::new(strategy, Market::new("BTC-USD", "99", "101", NOON));
 let sent = sim.start()?;                 // every intent sent, outcomes fed back
 let buy = placed(&sent)[0].clone();
-sim.send(&fill_of(&buy));                // a full fill; it moves sim.market.position
-sim.market.book = Some(book("101", "103", "10"));
-let next = sim.send(&Event::Book);
+sim.send(&fill_of(&buy));                // a full fill on Bullet; it moves the market's position
+sim.market.set_book(Some(book("101", "103", "10")));
+let next = sim.send(&on_bullet("BTC-USD", MarketEvent::Book));
 ```
 
 `SimHost` answers every place (taken, unless `refuse` says why not), cancel and amend with an
 `Outcome`, up to 3 rounds deep, cancels before amends before places; the views of those answer
 rounds carry no `open_orders`. It sends no `Order` updates, `Unknown` or `Answer`: build those events
 yourself (`outcome(&intent, Ok("id"))` or `Err("why")` makes an `Outcome`) and
-`send` them. Set `Market` fields (`position`, `open_orders`, `read_started_ms`, `path_stop`, ...)
-to shape the view.
+`send` them. Shape the view through `Market`: `main_mut()` is Bullet's market (`position`, `facts`, ...),
+`bullet_mut()` its exchange (`open_orders`, `read_started_ms`, `path_stop`, ...), `market_mut` /
+`exchange_mut` any other.

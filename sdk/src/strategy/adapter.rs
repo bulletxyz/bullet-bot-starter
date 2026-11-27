@@ -260,6 +260,16 @@ impl View<'_> {
     pub fn market(&self, venue: &str, symbol: &str) -> Option<&MarketView> {
         self.exchange(venue).and_then(|e| e.market(symbol))
     }
+
+    /// The one market declared on `venue`: what a strategy on one market with no symbol setting
+    /// trades (the host gives it exactly that market). `None` unless there is exactly one.
+    #[must_use]
+    pub fn sole_market(&self, venue: &str) -> Option<&MarketView> {
+        match self.exchange(venue)?.markets.as_slice() {
+            [market] => Some(market),
+            _ => None,
+        }
+    }
 }
 
 /// The venue's facts about the market, when it reports them.

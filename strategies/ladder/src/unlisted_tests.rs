@@ -22,13 +22,13 @@ fn ladder() -> (Ladder, Market, NewOrder) {
     let sent = ladder.start(&market.view()).unwrap();
     let (buy, sell) = (placed(&sent)[0].clone(), placed(&sent)[1].clone());
     // The sell rests: only the buy's placement is left without an answer.
-    let ok = outcome(&Intent::Place(sell), Ok("v2"));
+    let ok = outcome(&place(sell), Ok("v2"));
     ladder.on_event(&ok, &market.view());
     (ladder, market, buy)
 }
 
 fn unknown(order: &NewOrder) -> Event {
-    Event::Unknown { intent: Intent::Place(order.clone()), error: "timed out".into() }
+    Event::Unknown { intent: place(order.clone()), error: "timed out".into() }
 }
 
 fn resting(order: &NewOrder) -> Order {
@@ -48,16 +48,18 @@ fn resting(order: &NewOrder) -> Order {
 /// A tick at `now_ms` whose venue read began at `started` and lists `open`.
 fn read(ladder: &mut Ladder, market: &mut Market, open: Vec<Order>, started: Option<u64>) {
     market.now_ms = started.map_or(market.now_ms, |s| s.saturating_add(5));
-    market.open_orders = Some(open);
-    market.read_started_ms = started;
+    let bullet = market.bullet_mut().unwrap();
+    bullet.open_orders = Some(open);
+    bullet.read_started_ms = started;
     assert_eq!(ladder.on_event(&Event::Tick, &market.view()).len(), 0, "a tick places nothing");
-    market.open_orders = None;
-    market.read_started_ms = None;
+    let bullet = market.bullet_mut().unwrap();
+    bullet.open_orders = None;
+    bullet.read_started_ms = None;
 }
 
 fn book(ladder: &mut Ladder, market: &mut Market) -> Vec<NewOrder> {
     market.now_ms = market.now_ms.saturating_add(10);
-    placed(&ladder.on_event(&Event::Book, &market.view())).into_iter().cloned().collect()
+    placed(&ladder.on_event(&book_event(), &market.view())).into_iter().cloned().collect()
 }
 
 fn state(ladder: &Ladder) -> LevelState {
@@ -121,7 +123,12 @@ fn a_fill_of_the_freed_order_still_counts_and_overfills_nothing() {
     let late = fill_of(&buy);
     let out = ladder.on_event(&late, &market.view());
     assert_eq!(ladder.report().fills, 1);
-    let cancels: Vec<_> = out.iter().filter(|i| matches!(i, Intent::Cancel(_))).collect();
+    let cancels: Vec<_> = out
+        .iter()
+        .filter(|i| matches!(i, Intent::On { intent: ExchangeIntent::Cancel(_), .. }))
+        .collect();
     assert_eq!(cancels.len(), 1, "the new order would overfill the level: {out:?}");
-    assert!(matches!(cancels[0], Intent::Cancel(c) if c.client_id == again[0].client_id));
+    assert!(
+        matches!(cancels[0], Intent::On { intent: ExchangeIntent::Cancel(c), .. } if c.client_id == again[0].client_id)
+    );
 }

@@ -9,7 +9,9 @@
 
 use std::collections::HashSet;
 
-use bb_strategy_sdk::{CancelOrder, Intent, Order, OrderResult, OrderStatus, Trade};
+use bb_strategy_sdk::{
+    BULLET, CancelOrder, ExchangeIntent, Intent, Order, OrderResult, OrderStatus, Trade,
+};
 
 use crate::strategy::AvellanedaStoikov;
 use crate::strategy::slots::{InFlight, QuoteSlot, key_of};
@@ -40,7 +42,7 @@ impl AvellanedaStoikov {
     /// The answer to one of the round's intents (or to an orphan cancel, which keeps no state).
     pub(crate) fn on_outcome(&mut self, intent: &Intent, result: &OrderResult, now_ms: u64) {
         let Some(flight) = self.take_in_flight(intent) else {
-            if let Intent::Cancel(_) = intent
+            if let Intent::On { intent: ExchangeIntent::Cancel(_), .. } = intent
                 && !result.success
             {
                 tracing::warn!(
@@ -255,7 +257,7 @@ impl AvellanedaStoikov {
         let live_oids: HashSet<&str> = open.iter().map(|o| o.id.as_str()).collect();
         let live_client_ids: HashSet<&str> =
             open.iter().filter_map(|o| o.client_id.as_deref()).collect();
-        let read_started = view.read_started_ms;
+        let read_started = Self::bullet(view).and_then(|b| b.read_started_ms);
         self.settle_unknown(open, read_started);
         let before = self.slots.len();
         self.slots.retain(|s| match s.order_id.as_deref() {
@@ -301,11 +303,14 @@ impl AvellanedaStoikov {
         orphans
             .into_iter()
             .map(|o| {
-                Intent::Cancel(CancelOrder {
-                    symbol: self.config.symbol.clone(),
-                    order_id: o.id.clone(),
-                    client_id: o.client_id.clone(),
-                })
+                Intent::on(
+                    BULLET,
+                    ExchangeIntent::Cancel(CancelOrder {
+                        symbol: self.config.symbol.clone(),
+                        order_id: o.id.clone(),
+                        client_id: o.client_id.clone(),
+                    }),
+                )
             })
             .collect()
     }

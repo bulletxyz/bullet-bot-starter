@@ -1,6 +1,8 @@
 use bb_strategy_sdk::ValidateConfig;
-use bb_strategy_sdk::{Event, HistoryNeed, Intent, OrderResult, StrategyAdapter, StrategyError};
-use bb_strategy_sdk::{View, Warmup};
+use bb_strategy_sdk::{
+    BULLET, Event, ExchangeIntent, HistoryNeed, Intent, MarketEvent, OrderResult,
+};
+use bb_strategy_sdk::{StrategyAdapter, StrategyError, View, Warmup};
 use rust_decimal::Decimal;
 
 use crate::adapter::{GridStrategy, KEY_HARD_STOP, Seen};
@@ -15,7 +17,7 @@ impl StrategyAdapter for GridStrategy {
     /// is down.
     fn protective_stop(&self, view: &View<'_>) -> Option<bb_strategy_sdk::Protection> {
         let plan = self.plan.as_ref()?;
-        let stop = match view.position.cmp(&Decimal::ZERO) {
+        let stop = match self.position(view).cmp(&Decimal::ZERO) {
             std::cmp::Ordering::Greater => plan.stop_below,
             std::cmp::Ordering::Less => plan.stop_above,
             std::cmp::Ordering::Equal => None,
@@ -26,15 +28,21 @@ impl StrategyAdapter for GridStrategy {
     fn start(&mut self, view: &View<'_>) -> Result<Vec<Intent>, StrategyError> {
         self.config.validate().map_err(StrategyError)?;
         // A start that takes over what a kept shutdown left holds that position as its own.
-        if !view.position.is_zero() && !self.reclaiming {
+        let Some(shown) = self.market(view) else {
+            return Err(StrategyError(format!(
+                "The host shows no {} market on {BULLET}: the grid trades only that one.",
+                self.symbol()
+            )));
+        };
+        if !shown.position.is_zero() && !self.reclaiming {
             return Err(StrategyError(format!(
                 "The account already holds {} {}: the grid starts from no position. Close it on \
                  the venue (or use another sub-account), then start the grid.",
-                view.position,
+                shown.position,
                 self.symbol()
             )));
         }
-        let book = view.book.ok_or_else(|| {
+        let book = shown.book().ok_or_else(|| {
             StrategyError("No orderbook data available to compute mid at startup".into())
         })?;
         let mid = book.midpoint().ok_or_else(|| {
@@ -46,8 +54,8 @@ impl StrategyAdapter for GridStrategy {
                 self.symbol()
             )));
         }
-        self.tick = view.market.tick_size;
-        let market = Market { mid, tick: view.market.tick_size, lot: view.market.step_size };
+        self.tick = shown.facts.tick_size;
+        let market = Market { mid, tick: shown.facts.tick_size, lot: shown.facts.step_size };
         // The host's limits in force, when it shows them, else the build's.
         let limits = view.limits.as_ref().map_or(self.limits, |l| HardLimits {
             max_position: Some(l.max_position),
@@ -82,7 +90,7 @@ impl StrategyAdapter for GridStrategy {
             self.side_caps = self.worst_by_side(order_size);
         }
         // A kept run's position: taken over, and the grid goes on from it.
-        let resumed = self.reclaiming && !view.position.is_zero();
+        let resumed = self.reclaiming && !shown.position.is_zero();
         if resumed && let Some(halted) = self.check_halt(view, false) {
             // Past its hard stop already: it stops and closes now, as it would have running.
             return Ok(halted);
@@ -92,7 +100,7 @@ impl StrategyAdapter for GridStrategy {
         // the opening orders back before they go out.
         let mut intents = self.handle_trend_filter(view);
         if let Some(entry) = entry.filter(|_| !resumed) {
-            intents.push(Intent::Place(self.entry_order(entry, book)?));
+            intents.push(Self::on_bullet(ExchangeIntent::Place(self.entry_order(entry, book)?)));
         }
         intents.extend(self.place_pending_orders(view));
         // A grid started again (the owner resumed the hold) ends the last hard stop's alert.
@@ -106,29 +114,54 @@ impl StrategyAdapter for GridStrategy {
     fn on_event(&mut self, event: &Event, view: &View<'_>) -> Vec<Intent> {
         // A cancel's answer counts in any state: the stop's (and the wind-down's) cancel may fail.
         match event {
-            Event::Outcome { intent: Intent::CancelAll | Intent::CancelOwn, result } => {
+            Event::Outcome {
+                intent:
+                    Intent::On {
+                        intent: ExchangeIntent::CancelAll(_) | ExchangeIntent::CancelOwn(_),
+                        ..
+                    },
+                result,
+            } => {
                 let why = result.error.as_deref().unwrap_or("refused");
                 return self.pull.answered((!result.success).then_some(why)).into_iter().collect();
             }
-            Event::Failed { intent: Intent::CancelAll | Intent::CancelOwn, error } => {
+            Event::Failed {
+                intent:
+                    Intent::On {
+                        intent: ExchangeIntent::CancelAll(_) | ExchangeIntent::CancelOwn(_),
+                        ..
+                    },
+                error,
+            } => {
                 return self.pull.answered(Some(error)).into_iter().collect();
             }
             _ => {}
         }
-        if self.plan.is_none() {
+        // Nothing to do before the start, or without the grid's market in the view.
+        if self.plan.is_none() || self.market(view).is_none() {
             return Vec::new();
         }
         self.see(view);
         match event {
-            Event::Fill(trade) => self.on_fill(trade, view),
-            Event::Order(order) => {
-                self.on_order(order);
-                Vec::new()
+            Event::Market { exchange, symbol, event }
+                if exchange == BULLET && symbol == self.symbol() =>
+            {
+                match event {
+                    MarketEvent::Fill(trade) => self.on_fill(trade, view),
+                    MarketEvent::Order(order) => {
+                        self.on_order(order);
+                        Vec::new()
+                    }
+                    MarketEvent::Book => self.on_book(view),
+                    MarketEvent::Mark(_) => Vec::new(),
+                }
             }
-            Event::Book => self.on_book(view),
             Event::Tick => self.on_tick(view),
             // An acked place holds its level as an unknown one does: a read may lag the ack too.
-            Event::Outcome { intent: Intent::Place(order), result } => {
+            Event::Outcome {
+                intent: Intent::On { intent: ExchangeIntent::Place(order), .. },
+                result,
+            } => {
                 if result.success
                     && let Some(c) = &order.client_id
                 {
@@ -137,7 +170,10 @@ impl StrategyAdapter for GridStrategy {
                 self.placed(order, result)
             }
             // A place the host never sent (one that may have landed comes as `Unknown`) is refused.
-            Event::Failed { intent: Intent::Place(order), error } => {
+            Event::Failed {
+                intent: Intent::On { intent: ExchangeIntent::Place(order), .. },
+                error,
+            } => {
                 let refused = OrderResult {
                     order_id: None,
                     client_id: order.client_id.clone(),
@@ -148,7 +184,10 @@ impl StrategyAdapter for GridStrategy {
             }
             // A place that may have landed holds its level as placed (order id unknown): it is not
             // placed again. A later read that does not list it frees the level (reconcile).
-            Event::Unknown { intent: Intent::Place(order), .. } => {
+            Event::Unknown {
+                intent: Intent::On { intent: ExchangeIntent::Place(order), .. },
+                ..
+            } => {
                 let held = OrderResult {
                     order_id: None,
                     client_id: order.client_id.clone(),
@@ -169,7 +208,7 @@ impl StrategyAdapter for GridStrategy {
         // A stopped grid with a position left closes it on the way out; otherwise cancel only (a
         // reconfigure's flatten is the supervisor's).
         tracing::info!("Shutting down grid — cancelling all orders");
-        let mut out = vec![Intent::CancelAll];
+        let mut out = vec![self.cancel_all()];
         if let Some(attempt) = self.halt.as_ref().map(|h| h.attempts.saturating_add(1)) {
             out.extend(self.close(view, attempt));
         }

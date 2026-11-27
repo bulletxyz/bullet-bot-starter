@@ -5,9 +5,10 @@
 
 use std::collections::BTreeMap;
 
-use bb_strategy_sdk::testing::{Market, book, outcome};
+use bb_strategy_sdk::testing::{Market, book, on_bullet, outcome};
 use bb_strategy_sdk::{
-    Decimal, Event, Intent, NewOrder, Order, OrderStatus, Side, StrategyAdapter, Trade,
+    Decimal, Event, ExchangeIntent, Intent, MarketEvent, NewOrder, Order, OrderStatus, Side,
+    StrategyAdapter, Trade,
 };
 
 use crate::{Ladder, LadderSettings, LevelState};
@@ -104,6 +105,9 @@ pub struct Model {
     placed_at: Vec<u64>,
     cancelled_at: Vec<u64>,
 }
+
+/// The one market `Market::new` puts on Bullet.
+const SYM: &str = "BTC-USD";
 
 fn level_of(id: &str) -> String {
     id.rsplit_once('-').map_or_else(|| id.to_owned(), |(l, _)| l.to_owned())
@@ -236,8 +240,12 @@ impl Model {
     fn process(&mut self, intents: &[Intent]) {
         for intent in intents {
             match intent {
-                Intent::Place(order) => self.on_place(intent, order),
-                Intent::Cancel(c) => self.on_cancel(intent, c.client_id.as_deref().unwrap_or("")),
+                Intent::On { intent: ExchangeIntent::Place(order), .. } => {
+                    self.on_place(intent, order);
+                }
+                Intent::On { intent: ExchangeIntent::Cancel(c), .. } => {
+                    self.on_cancel(intent, c.client_id.as_deref().unwrap_or(""));
+                }
                 other => self.fail(&format!("unexpected intent {other:?}")),
             }
         }
@@ -390,17 +398,20 @@ impl Model {
         o.venue_live = false;
         let reported = if !self.chaos || self.rng.chance(60) { Decimal::ZERO } else { filled };
         let order = &o.order;
-        let event = Event::Order(Order {
-            id: "venue-id".into(),
-            client_id: order.client_id.clone(),
-            symbol: order.symbol.clone(),
-            side: order.side,
-            order_type: order.order_type,
-            price: order.price,
-            quantity: order.quantity,
-            filled_quantity: reported,
-            status,
-        });
+        let event = on_bullet(
+            SYM,
+            MarketEvent::Order(Order {
+                id: "venue-id".into(),
+                client_id: order.client_id.clone(),
+                symbol: order.symbol.clone(),
+                side: order.side,
+                order_type: order.order_type,
+                price: order.price,
+                quantity: order.quantity,
+                filled_quantity: reported,
+                status,
+            }),
+        );
         let told = Told::Ended(
             id.into(),
             if status == OrderStatus::Filled { order.quantity } else { reported },
@@ -422,12 +433,12 @@ impl Model {
     }
 
     fn book_event(&mut self, kind: u64) {
-        self.market.book = Some(match kind {
+        self.market.set_book(Some(match kind {
             0 => bb_strategy_sdk::OrderBook::default(),
             1 => book("76", "75", "10"),
             _ => book("75", "76", "10"),
-        });
-        self.deliver(&Event::Book, &Told::Nothing);
+        }));
+        self.deliver(&on_bullet(SYM, MarketEvent::Book), &Told::Nothing);
     }
 
     /// One random step.

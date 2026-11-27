@@ -1,5 +1,5 @@
 use bb_strategy_sdk::{CancelOrder, NewOrder, OrderBook, OrderResult, OrderType, Side};
-use bb_strategy_sdk::{Intent, StrategyError, View};
+use bb_strategy_sdk::{ExchangeIntent, Intent, StrategyError, View};
 use bb_strategy_support::ioc::{MAX_IOC_BPS_FROM_MID, capped_ioc_price, two_sided_mid};
 use bb_strategy_support::touch;
 use rust_decimal::Decimal;
@@ -22,7 +22,7 @@ impl GridStrategy {
             self.side_caps.map_or((max_position, max_position), |(l, s)| {
                 (l.min(max_position), s.min(max_position))
             });
-        let net_position = view.position;
+        let net_position = self.position(view);
         let closing = self.state.closing(net_position, order_size);
         let mut projected_long = net_position + self.state.active_remaining(Side::Buy, order_size);
         let mut projected_short =
@@ -51,7 +51,7 @@ impl GridStrategy {
             }
             let mut price = level_price;
             if order_type == OrderType::PostOnly
-                && let Some(book) = view.book
+                && let Some(book) = self.book(view)
                 && book.would_cross(side, price)
             {
                 // Repriced to the touch on its own side: still a maker order.
@@ -112,7 +112,7 @@ impl GridStrategy {
         if !orders.is_empty() {
             tracing::info!(count = orders.len(), "Placing grid orders");
         }
-        orders.into_iter().map(Intent::Place).collect()
+        orders.into_iter().map(|o| Self::on_bullet(ExchangeIntent::Place(o))).collect()
     }
 
     /// The venue's answer to a `Place`: the level goes Active, or back to retry.
@@ -146,11 +146,11 @@ impl GridStrategy {
             if !result.success || order.reduce_only {
                 return Vec::new();
             }
-            return vec![Intent::Cancel(CancelOrder {
+            return vec![Self::on_bullet(ExchangeIntent::Cancel(CancelOrder {
                 symbol: self.symbol().to_string(),
                 order_id: result.order_id.clone().unwrap_or_default(),
                 client_id: order.client_id.clone(),
-            })];
+            }))];
         };
         if result.success {
             level.state = LevelState::Active;

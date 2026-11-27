@@ -98,6 +98,23 @@ impl Market {
         self.exchange_mut(venue)?.markets.iter_mut().find(|m| m.symbol == symbol)
     }
 
+    /// Bullet, the exchange [`Market::new`] makes.
+    pub fn bullet_mut(&mut self) -> Option<&mut ExchangeView> {
+        self.exchange_mut(BULLET)
+    }
+
+    /// Bullet's first market: the one [`Market::new`] makes.
+    pub fn main_mut(&mut self) -> Option<&mut MarketView> {
+        self.bullet_mut()?.markets.first_mut()
+    }
+
+    /// The book of [`Self::main_mut`]'s market (none: no book).
+    pub fn set_book(&mut self, book: Option<OrderBook>) {
+        if let Some(market) = self.main_mut() {
+            market.book = book.map(Arc::new);
+        }
+    }
+
     fn view_over<'a>(&'a self, exchanges: &'a [ExchangeView]) -> View<'a> {
         View {
             now_ms: self.now_ms,
@@ -161,6 +178,12 @@ fn client_id(intent: &Intent) -> Option<String> {
         | Intent::StandDown(_)
         | Intent::Targets(_) => None,
     }
+}
+
+/// `event` in the market `symbol` on Bullet.
+#[must_use]
+pub fn on_bullet(symbol: &str, event: MarketEvent) -> Event {
+    Event::Market { exchange: BULLET.into(), symbol: symbol.into(), event }
 }
 
 /// A full fill of `order` on Bullet.

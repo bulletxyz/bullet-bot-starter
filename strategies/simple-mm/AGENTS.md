@@ -48,7 +48,7 @@ the files under `src/adapter/` need a failing test first, then the fix.
 - A place left unknown holds its side (never placed again) until a read settles it; a read frees a slot or a
   stray it does not list only when it started `SETTLE_MS` (2 s) after the answer. The venue is read every 30 s,
   on a reconnect, and while a stray or an unknown place is held (`wants_venue`).
-- While the host stops new orders (`View::path_stop`, `View::stop`, `View::venue_halt`), while paused or closing,
+- While the host stops new orders (Bullet's `ExchangeView::path_stop`, `View::stop`, `ExchangeView::venue_halt`), while paused or closing,
   and without a two-sided book, nothing is quoted and what rests is pulled with one `CancelOwn`, asked again at
   most every 10 s while it fails. `stop` asks nothing: the host's wind-down cancels (or keeps) the quotes.
 

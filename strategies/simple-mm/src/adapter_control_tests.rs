@@ -3,12 +3,12 @@
 use bb_strategy_sdk::param_spec::BoundsMode;
 use bb_strategy_sdk::testing::d;
 use bb_strategy_sdk::{
-    CloseReport, ControlCmd, ControlReply, Event, Intent, LimitChanges, SettingChanges, Side,
-    StrategyAdapter,
+    BULLET, CloseReport, ControlCmd, ControlReply, Event, ExchangeIntent, Intent, LimitChanges,
+    SettingChanges, Side, StrategyAdapter,
 };
 use serde_json::json;
 
-use super::tests::Rig;
+use super::tests::{Rig, pull};
 
 fn control(r: &mut Rig, id: u64, cmd: ControlCmd) -> Vec<Intent> {
     r.send(&Event::Control { id, cmd })
@@ -59,7 +59,7 @@ fn a_settings_change_applies_and_the_next_refresh_quotes_with_it() {
     let prices: Vec<_> = sent
         .iter()
         .map(|i| match i {
-            Intent::Place(o) => o.price,
+            Intent::On { intent: ExchangeIntent::Place(o), .. } => o.price,
             other => panic!("{other:?}"),
         })
         .collect();
@@ -87,7 +87,7 @@ fn a_change_is_held_to_its_range_by_the_mode_it_was_authorized_under() {
 #[test]
 fn the_order_size_is_held_to_the_step_and_half_the_cap() {
     let mut r = Rig::new(&json!({}));
-    r.m.market.step_size = Some(d("0.01"));
+    r.m.main_mut().unwrap().facts.step_size = Some(d("0.01"));
     r.book("99", "101");
     for (id, size) in [(1, "0.6"), (2, "0.005"), (3, "0")] {
         let c = SettingChanges { bounds: BoundsMode::Extended, ..SettingChanges::default() }
@@ -144,9 +144,9 @@ fn a_pause_pulls_and_replies_once_the_pull_is_back_and_a_resume_quotes_again() {
     let mut r = Rig::new(&json!({ "refresh_secs": 60 }));
     let sent = r.book("99", "101");
     r.take(&sent);
-    r.m.position = d("0.3");
-    assert_eq!(control(&mut r, 1, ControlCmd::Pause), [Intent::CancelOwn]);
-    let out = r.take(&[Intent::CancelOwn]);
+    r.m.main_mut().unwrap().position = d("0.3");
+    assert_eq!(control(&mut r, 1, ControlCmd::Pause), [pull()]);
+    let out = r.take(&[pull()]);
     assert_eq!(ok(&reply(&out, 1)), "Paused. All quotes cancelled; position 0.3 kept.");
     assert!(r.book("99", "101").is_empty());
     let out = control(&mut r, 2, ControlCmd::Resume);
@@ -167,10 +167,11 @@ fn a_pause_whose_pull_failed_says_so() {
 #[test]
 fn a_close_stops_quoting_asks_the_host_and_words_the_reply_from_its_report() {
     let mut r = Rig::new(&json!({}));
-    r.m.market.step_size = Some(d("0.001"));
+    r.m.main_mut().unwrap().facts.step_size = Some(d("0.001"));
     let sent = r.book("99", "101");
     r.take(&sent);
-    assert_eq!(control(&mut r, 7, ControlCmd::ClosePosition), [Intent::ClosePosition { id: 7 }]);
+    let close = Intent::ClosePosition { id: 7, exchange: BULLET.into(), symbol: "BTC-USD".into() };
+    assert_eq!(control(&mut r, 7, ControlCmd::ClosePosition), [close]);
     let again = control(&mut r, 8, ControlCmd::ClosePosition);
     assert!(refused(&reply(&again, 8)).contains("already in progress"));
     let report = CloseReport {
@@ -265,9 +266,11 @@ fn every_command_is_answered_exactly_once() {
             all.extend(out.clone());
             for intent in &out {
                 let answer = match intent {
-                    Intent::CancelOwn if fail => r.refuse(intent, "down"),
-                    Intent::CancelOwn => r.take(&[Intent::CancelOwn]),
-                    Intent::ClosePosition { id } => {
+                    Intent::On { intent: ExchangeIntent::CancelOwn(_), .. } if fail => {
+                        r.refuse(intent, "down")
+                    }
+                    Intent::On { intent: ExchangeIntent::CancelOwn(_), .. } => r.take(&[pull()]),
+                    Intent::ClosePosition { id, .. } => {
                         let report = CloseReport {
                             cancel_error: fail.then(|| "down".into()),
                             start: Ok(d("0")),

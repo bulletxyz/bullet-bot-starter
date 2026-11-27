@@ -3,9 +3,9 @@
 
 use std::collections::BTreeMap;
 
+use bb_strategy_sdk::testing::Market;
 use bb_strategy_sdk::{
-    Candle, CandleInterval, HistoryNeed, Intent, MarketFacts, OrderBook, StrategyAdapter, View,
-    Warmup,
+    Candle, CandleInterval, ExchangeIntent, HistoryNeed, Intent, OrderBook, StrategyAdapter, Warmup,
 };
 use rust_decimal::Decimal;
 
@@ -53,29 +53,15 @@ fn book() -> OrderBook {
     OrderBook { bids, asks, last_update_id: 0 }
 }
 
-fn view(book: &OrderBook) -> View<'_> {
-    View {
-        now_ms: NOON,
-        symbol: "SOL-USD",
-        book: Some(book),
-        position: Decimal::ZERO,
-        avg_entry: None,
-        realized_pnl: Decimal::ZERO,
-        open_orders: Some(&[]),
-        positions: Some(&[]),
-        reconnected: false,
-        venue_halt: None,
-        path_stop: None,
-        read_started_ms: None,
-        limits: None,
-        stop: None,
-        market: MarketFacts {
-            tick_size: Some(d("0.001")),
-            step_size: Some(d("0.01")),
-            ..MarketFacts::default()
-        },
-        legs: &[],
-    }
+/// SOL-USD on Bullet with `book`, a tick of 0.001 and a lot of 0.01, flat; nothing resting.
+fn view(book: &OrderBook) -> Market {
+    let mut market = Market::new("SOL-USD", "0", "0", NOON);
+    market.set_book(Some(book.clone()));
+    market.bullet_mut().unwrap().positions = Some(Vec::new());
+    let facts = &mut market.main_mut().unwrap().facts;
+    facts.tick_size = Some(d("0.001"));
+    facts.step_size = Some(d("0.01"));
+    market
 }
 
 /// The orders a start places, without their client ids (each grid issues its own).
@@ -83,7 +69,7 @@ fn orders(intents: &[Intent]) -> Vec<String> {
     intents
         .iter()
         .map(|i| match i {
-            Intent::Place(o) => {
+            Intent::On { intent: ExchangeIntent::Place(o), .. } => {
                 format!("{:?} {} {} {:?}", o.side, o.price, o.quantity, o.order_type)
             }
             other => format!("{other:?}"),
@@ -110,14 +96,14 @@ fn a_derived_grid_asks_for_its_daily_and_hourly_candles() {
 fn candles_the_host_loads_lay_the_grid_the_builds_history_did() {
     let b = book();
     let mut built = GridStrategy::new(derived()).with_history(history());
-    let want = built.start(&view(&b)).unwrap();
+    let want = built.start(&view(&b).view()).unwrap();
     let mut loaded_grid = GridStrategy::new(derived());
     for need in loaded_grid.histories() {
         let h = history();
         let bars = if need.interval == CandleInterval::D1 { h.daily } else { h.hourly };
         loaded_grid.warm_up_for(need, loaded(bars));
     }
-    let got = loaded_grid.start(&view(&b)).unwrap();
+    let got = loaded_grid.start(&view(&b).view()).unwrap();
     assert!(!want.is_empty());
     assert_eq!(orders(&got), orders(&want));
 }
@@ -135,6 +121,6 @@ fn a_grid_whose_candles_could_not_be_loaded_refuses_to_start_and_says_why() {
         grid.warm_up_for(need, warmup);
     }
     let b = book();
-    let e = grid.start(&view(&b)).unwrap_err();
+    let e = grid.start(&view(&b).view()).unwrap_err();
     assert!(e.0.contains("can't set its range for SOL-USD: Binance refused (HTTP 451)"), "{e}");
 }

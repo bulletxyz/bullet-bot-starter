@@ -1,13 +1,34 @@
 //! The ladder on the SDK's simulated host: no venue, no component.
 
-use bb_strategy_sdk::testing::{Market, SimHost, d, fill_of, outcome, placed};
+use bb_strategy_sdk::testing::{
+    Market, SimHost, d, exchange, fill_of, market, on_bullet, outcome, placed,
+};
 use bb_strategy_sdk::{
-    Event, FieldValue, Intent, NewOrder, OrderType, Side, StrategyAdapter, StrategyReport,
+    CancelOrder, Event, FieldValue, Intent, NewOrder, Order, OrderType, Side, StrategyAdapter,
+    StrategyReport,
 };
 
 use super::*;
 
 const NOON: u64 = 1_794_398_400_000;
+/// The one market `Market::new` puts on Bullet in these tests.
+const SYM: &str = "BTC-USD";
+
+fn book_event() -> Event {
+    on_bullet(SYM, MarketEvent::Book)
+}
+
+fn order_event(order: Order) -> Event {
+    on_bullet(SYM, MarketEvent::Order(order))
+}
+
+fn place(order: NewOrder) -> Intent {
+    Intent::on(BULLET, ExchangeIntent::Place(order))
+}
+
+fn cancel(order: CancelOrder) -> Intent {
+    Intent::on(BULLET, ExchangeIntent::Cancel(order))
+}
 
 fn settings(levels: u32) -> LadderSettings {
     LadderSettings {
@@ -47,7 +68,7 @@ fn start_lays_the_ladder_around_the_mid_rounded_away_from_it() {
 #[test]
 fn the_venue_tick_size_rounds_the_levels() {
     let mut market = Market::new("BTC-USD", "75", "76", NOON);
-    market.market.tick_size = Some(d("0.5"));
+    market.main_mut().unwrap().facts.tick_size = Some(d("0.5"));
     let mut sim = host(1, market);
     let sent = sim.start().unwrap();
     assert_eq!(prices(&sent), [(Side::Buy, "75".to_string()), (Side::Sell, "76".to_string())]);
@@ -56,14 +77,14 @@ fn the_venue_tick_size_rounds_the_levels() {
 #[test]
 fn without_a_book_it_waits_and_lays_the_ladder_on_the_first() {
     let mut market = Market::new("BTC-USD", "75", "76", NOON);
-    market.book = None;
+    market.set_book(None);
     let mut sim = host(1, market);
     assert_eq!(sim.start().unwrap().len(), 0);
     assert_eq!(sim.strategy.report().headline(), "ladder: waiting for a book");
-    sim.market.book = Some(bb_strategy_sdk::testing::book("99", "101", "1"));
-    let sent = sim.send(&Event::Book);
+    sim.market.set_book(Some(bb_strategy_sdk::testing::book("99", "101", "1")));
+    let sent = sim.send(&book_event());
     assert_eq!(prices(&sent), [(Side::Buy, "99.9".to_string()), (Side::Sell, "100.1".to_string())]);
-    assert_eq!(sim.send(&Event::Book).len(), 0, "laid once");
+    assert_eq!(sim.send(&book_event()).len(), 0, "laid once");
 }
 
 #[test]
@@ -76,7 +97,7 @@ fn a_filled_level_is_placed_again_at_its_price_with_a_new_client_id() {
     assert_eq!(again.len(), 1);
     assert_eq!((again[0].side, again[0].price), (buy.side, buy.price));
     assert_ne!(again[0].client_id, buy.client_id);
-    assert_eq!(sim.market.position, d("0.01"));
+    assert_eq!(sim.market.main_mut().unwrap().position, d("0.01"));
     assert_eq!(sim.strategy.report().fills, 1);
 }
 
@@ -98,7 +119,7 @@ fn a_cancelled_level_counts_as_refused() {
     let mut sim = host(1, Market::new("BTC-USD", "75", "76", NOON));
     let sent = sim.start().unwrap();
     let sell = placed(&sent)[1].clone();
-    let cancelled = bb_strategy_sdk::Order {
+    let cancelled = Order {
         id: "x".into(),
         client_id: sell.client_id.clone(),
         symbol: sell.symbol.clone(),
@@ -109,7 +130,7 @@ fn a_cancelled_level_counts_as_refused() {
         filled_quantity: d("0"),
         status: OrderStatus::Cancelled,
     };
-    assert_eq!(sim.send(&Event::Order(cancelled)).len(), 0);
+    assert_eq!(sim.send(&order_event(cancelled)).len(), 0);
     assert_eq!(sim.strategy.report().levels[1].state, LevelState::Refused);
 }
 
@@ -120,15 +141,26 @@ fn an_outcome_for_an_unknown_order_changes_nothing() {
     let before = sim.strategy.report();
     let mut stranger = placed(&sim.sent)[0].clone();
     stranger.client_id = Some("not-ours".into());
-    assert_eq!(sim.send(&outcome(&Intent::Place(stranger), Err("refused"))).len(), 0);
+    assert_eq!(sim.send(&outcome(&place(stranger), Err("refused"))).len(), 0);
     assert_eq!(sim.strategy.report(), before);
+}
+
+/// One market on Bullet, or it does not start: its stop cancels that market, never every one.
+#[test]
+fn start_refuses_unless_bullet_shows_one_market() {
+    let two = vec![market("BTC-USD", "75", "76"), market("ETH-USD", "2000", "2001")];
+    for exchanges in [vec![exchange(BULLET, two)], vec![exchange(BULLET, Vec::new())], Vec::new()] {
+        let mut sim = host(2, Market::of(NOON, exchanges.clone()));
+        assert!(sim.start().is_err(), "{exchanges:?}");
+        assert_eq!(sim.sent, Vec::new(), "nothing sent: {exchanges:?}");
+    }
 }
 
 #[test]
 fn stop_cancels_everything() {
     let mut sim = host(2, Market::new("BTC-USD", "75", "76", NOON));
     sim.start().unwrap();
-    assert_eq!(sim.stop(), [Intent::CancelAll]);
+    assert_eq!(sim.stop(), [Intent::on(BULLET, ExchangeIntent::CancelAll(Some(SYM.into())))]);
 }
 
 #[test]
